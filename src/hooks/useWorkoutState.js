@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/workoutDb';
 
-// Default exercise definitions with new fields
+// Default exercises backup list (for reset/seeding fallback)
 const DEFAULT_EXERCISES = [
   {
     id: 'db-shoulder-press',
@@ -38,128 +40,35 @@ const DEFAULT_EXERCISES = [
 ];
 
 export const useWorkoutState = () => {
-  // 1. Exercises Configuration (with inline migration)
-  const [exercises, setExercises] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_exercises');
-    const raw = saved ? JSON.parse(saved) : DEFAULT_EXERCISES;
-    
-    let migrated = false;
-    const migratedExs = raw.map(ex => {
-      let changed = false;
-      const copy = { ...ex };
-      
-      if (!('muscleGroup' in copy)) {
-        if (copy.id === 'db-shoulder-press' || copy.id === 'lateral-raises') {
-          copy.muscleGroup = 'Shoulders';
-        } else if (copy.id === 'db-chest-press') {
-          copy.muscleGroup = 'Chest';
-        } else {
-          copy.muscleGroup = 'Triceps';
-        }
-        changed = true;
-      }
-      
-      if (!('exerciseType' in copy)) {
-        copy.exerciseType = copy.id === 'lateral-raises' ? 'isolation' : 'compound';
-        changed = true;
-      }
-      
-      if (!('restDuration' in copy)) {
-        copy.restDuration = copy.exerciseType === 'isolation' ? 90 : 120;
-        changed = true;
-      }
-      
-      if (changed) migrated = true;
-      return copy;
+  // 1. Reactive Queries from IndexedDB using Dexie
+  const exercises = useLiveQuery(() => db.exercises.toArray()) || [];
+  
+  // Sort history newest to oldest for easy listing
+  const history = useLiveQuery(() => db.history.orderBy('timestamp').reverse().toArray()) || [];
+
+  const preferencesObj = useLiveQuery(async () => {
+    const arr = await db.preferences.toArray();
+    const prefs = { prefLoggingMode: 'RPE' };
+    arr.forEach(p => {
+      prefs[p.key] = p.value;
     });
-    
-    if (migrated) {
-      localStorage.setItem('hypertrophy_exercises', JSON.stringify(migratedExs));
-    }
-    return migratedExs;
+    return prefs;
   });
+  
+  const preferences = preferencesObj || { prefLoggingMode: 'RPE' };
 
-  // 2. Workout History (with inline migration)
-  const [history, setHistory] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_history');
-    const raw = saved ? JSON.parse(saved) : [];
-    
-    let migrated = false;
-    const migratedHist = raw.map(session => {
-      let sessionChanged = false;
-      const updatedExs = session.exercises.map(ex => {
-        let exChanged = false;
-        
-        let mg = ex.muscleGroup;
-        if (!mg) {
-          mg = ex.exerciseId === 'db-shoulder-press' || ex.exerciseId === 'lateral-raises' ? 'Shoulders' : ex.exerciseId === 'db-chest-press' ? 'Chest' : 'Triceps';
-          exChanged = true;
-        }
-
-        const updatedSets = ex.sets.map(set => {
-          let setChanged = false;
-          const setCopy = { ...set };
-          
-          if (!('isWarmup' in setCopy)) {
-            setCopy.isWarmup = false;
-            setChanged = true;
-          }
-          if (!('completed' in setCopy)) {
-            setCopy.completed = true;
-            setChanged = true;
-          }
-          if (setChanged) exChanged = true;
-          return setCopy;
-        });
-
-        if (exChanged) sessionChanged = true;
-        return {
-          ...ex,
-          muscleGroup: mg,
-          sets: updatedSets
-        };
-      });
-
-      if (sessionChanged) migrated = true;
-      return {
-        ...session,
-        exercises: updatedExs
-      };
-    });
-
-    if (migrated) {
-      localStorage.setItem('hypertrophy_history', JSON.stringify(migratedHist));
-    }
-    return migratedHist;
-  });
-
-  // 3. Current Active Workout
+  // 2. LocalStorage for transient/active session data (Refreshes safe)
   const [currentWorkout, setCurrentWorkout] = useState(() => {
     const saved = localStorage.getItem('hypertrophy_current_workout');
     return saved ? JSON.parse(saved) : null;
   });
 
-  // 4. Preferences
-  const [preferences, setPreferences] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_preferences');
-    return saved ? JSON.parse(saved) : { prefLoggingMode: 'RPE' }; // 'RPE' | 'RIR'
-  });
-
-  // 5. Rest Timer End Time
   const [restEndTime, setRestEndTime] = useState(() => {
     const saved = localStorage.getItem('hypertrophy_rest_end_time');
     return saved ? parseInt(saved) : null;
   });
 
-  // Save changes to local storage on changes
-  useEffect(() => {
-    localStorage.setItem('hypertrophy_exercises', JSON.stringify(exercises));
-  }, [exercises]);
-
-  useEffect(() => {
-    localStorage.setItem('hypertrophy_history', JSON.stringify(history));
-  }, [history]);
-
+  // Keep transient data saved
   useEffect(() => {
     if (currentWorkout) {
       localStorage.setItem('hypertrophy_current_workout', JSON.stringify(currentWorkout));
@@ -169,10 +78,6 @@ export const useWorkoutState = () => {
   }, [currentWorkout]);
 
   useEffect(() => {
-    localStorage.setItem('hypertrophy_preferences', JSON.stringify(preferences));
-  }, [preferences]);
-
-  useEffect(() => {
     if (restEndTime) {
       localStorage.setItem('hypertrophy_rest_end_time', restEndTime.toString());
     } else {
@@ -180,37 +85,108 @@ export const useWorkoutState = () => {
     }
   }, [restEndTime]);
 
-  // Update preferences helper
-  const updatePreference = (key, value) => {
-    setPreferences((prev) => ({
-      ...prev,
-      [key]: value
-    }));
-  };
+  // 3. Automatic data migration from localStorage to IndexedDB
+  useEffect(() => {
+    const runMigration = async () => {
+      try {
+        const dbExercisesCount = await db.exercises.count();
+        const dbHistoryCount = await db.history.count();
+        
+        const oldExercisesRaw = localStorage.getItem('hypertrophy_exercises');
+        const oldHistoryRaw = localStorage.getItem('hypertrophy_history');
+        const oldPrefRaw = localStorage.getItem('hypertrophy_preferences');
+        
+        // Migrate Exercises Configuration
+        if (oldExercisesRaw && dbExercisesCount <= 3) {
+          const oldExs = JSON.parse(oldExercisesRaw);
+          // Empty seed data to copy exact settings from old localStorage
+          await db.exercises.clear();
+          const migratedExs = oldExs.map(ex => {
+            const copy = { ...ex };
+            if (!('muscleGroup' in copy)) {
+              copy.muscleGroup = copy.id === 'db-shoulder-press' || copy.id === 'lateral-raises' ? 'Shoulders' : copy.id === 'db-chest-press' ? 'Chest' : 'Triceps';
+            }
+            if (!('exerciseType' in copy)) {
+              copy.exerciseType = copy.id === 'lateral-raises' ? 'isolation' : 'compound';
+            }
+            if (!('restDuration' in copy)) {
+              copy.restDuration = copy.exerciseType === 'isolation' ? 90 : 120;
+            }
+            return copy;
+          });
+          await db.exercises.bulkAdd(migratedExs);
+          console.log('Exercises migrated to IndexedDB successfully.');
+        }
+        
+        // Migrate Completed History Logs
+        if (oldHistoryRaw && dbHistoryCount === 0) {
+          const oldHist = JSON.parse(oldHistoryRaw);
+          const migratedHist = oldHist.map(session => ({
+            ...session,
+            exercises: session.exercises.map(ex => ({
+              ...ex,
+              muscleGroup: ex.muscleGroup || (ex.exerciseId === 'db-shoulder-press' || ex.exerciseId === 'lateral-raises' ? 'Shoulders' : ex.exerciseId === 'db-chest-press' ? 'Chest' : 'Triceps'),
+              sets: ex.sets.map(set => ({
+                weight: parseFloat(set.weight) || 0,
+                reps: parseInt(set.reps) || 0,
+                isWarmup: set.isWarmup !== undefined ? !!set.isWarmup : false,
+                completed: set.completed !== undefined ? !!set.completed : true,
+                rpe: set.rpe !== undefined ? set.rpe : null,
+                rir: set.rir !== undefined ? set.rir : null
+              }))
+            }))
+          }));
+          await db.history.bulkAdd(migratedHist);
+          console.log('History logs migrated to IndexedDB successfully.');
+        }
 
-  // Rest Timer controls (memoized so effects depending on them don't re-run every render)
-  const startRestTimer = useCallback((seconds) => {
-    setRestEndTime(Date.now() + seconds * 1000);
+        // Migrate Preferences
+        if (oldPrefRaw) {
+          const oldPrefs = JSON.parse(oldPrefRaw);
+          if (oldPrefs.prefLoggingMode) {
+            await db.preferences.put({ key: 'prefLoggingMode', value: oldPrefs.prefLoggingMode });
+          }
+        }
+
+        // Clear migrated localStorage parameters to prevent re-runs
+        localStorage.removeItem('hypertrophy_exercises');
+        localStorage.removeItem('hypertrophy_history');
+        localStorage.removeItem('hypertrophy_preferences');
+      } catch (err) {
+        console.error('IndexedDB data migration failed:', err);
+      }
+    };
+
+    runMigration();
   }, []);
 
-  const extendRestTimer = useCallback((seconds) => {
+  // Update preferences helper
+  const updatePreference = async (key, value) => {
+    await db.preferences.put({ key, value });
+  };
+
+  // Rest Timer controls
+  const startRestTimer = (seconds) => {
+    setRestEndTime(Date.now() + seconds * 1000);
+  };
+
+  const extendRestTimer = (seconds) => {
     setRestEndTime((prev) => {
       const base = prev && prev > Date.now() ? prev : Date.now();
       return base + seconds * 1000;
     });
-  }, []);
+  };
 
-  const clearRestTimer = useCallback(() => {
+  const clearRestTimer = () => {
     setRestEndTime(null);
-  }, []);
+  };
 
   // Helper: Find the last weight logged for an exercise (from working sets only)
   const getLastLoggedWeight = (exerciseId) => {
-    const sortedHistory = [...history].sort((a, b) => b.timestamp - a.timestamp);
-    for (const session of sortedHistory) {
+    // History is already sorted newest to oldest from the Dexie live query!
+    for (const session of history) {
       const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
       if (ex && ex.sets && ex.sets.length > 0) {
-        // Find the first working set that has a weight
         const workingSets = ex.sets.filter(s => !s.isWarmup);
         const firstWorkingWithWeight = workingSets.find(s => parseFloat(s.weight) > 0);
         if (firstWorkingWithWeight) {
@@ -227,8 +203,7 @@ export const useWorkoutState = () => {
 
   // Helper: Find the last reps logged for an exercise
   const getLastLoggedReps = (exerciseId) => {
-    const sortedHistory = [...history].sort((a, b) => b.timestamp - a.timestamp);
-    for (const session of sortedHistory) {
+    for (const session of history) {
       const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
       if (ex && ex.sets && ex.sets.length > 0) {
         const workingSets = ex.sets.filter(s => !s.isWarmup);
@@ -287,7 +262,7 @@ export const useWorkoutState = () => {
   };
 
   // Complete current workout
-  const completeWorkout = () => {
+  const completeWorkout = async () => {
     if (!currentWorkout) return;
 
     const sanitizedExercises = currentWorkout.exercises.map((ex) => ({
@@ -320,7 +295,8 @@ export const useWorkoutState = () => {
       exercises: sanitizedExercises
     };
 
-    setHistory((prev) => [completedSession, ...prev]);
+    // Add to IndexedDB history store
+    await db.history.add(completedSession);
     setCurrentWorkout(null);
     clearRestTimer();
     return completedSession;
@@ -461,7 +437,7 @@ export const useWorkoutState = () => {
   };
 
   // Add a custom exercise to global config
-  const addExerciseToConfig = (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120) => {
+  const addExerciseToConfig = async (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120) => {
     if (!name.trim()) return;
     const id = `custom-config-${Date.now()}`;
     const newEx = {
@@ -475,28 +451,29 @@ export const useWorkoutState = () => {
       exerciseType,
       restDuration: parseInt(restDuration) || 120
     };
-    setExercises((prev) => [...prev, newEx]);
+    await db.exercises.add(newEx);
   };
 
   // Update exercise in global config
-  const updateExerciseInConfig = (id, updatedFields) => {
-    setExercises((prev) =>
-      prev.map((ex) => (ex.id === id ? { ...ex, ...updatedFields } : ex))
-    );
+  const updateExerciseInConfig = async (id, updatedFields) => {
+    await db.exercises.update(id, updatedFields);
   };
 
   // Delete exercise from global config
-  const deleteExerciseFromConfig = (id) => {
-    setExercises((prev) => prev.filter((ex) => ex.id !== id));
+  const deleteExerciseFromConfig = async (id) => {
+    await db.exercises.delete(id);
   };
 
   // Reorder exercises in global config
-  const reorderExercises = (startIndex, endIndex) => {
-    setExercises((prev) => {
-      const result = Array.from(prev);
-      const [removed] = result.splice(startIndex, 1);
-      result.splice(endIndex, 0, removed);
-      return result;
+  const reorderExercises = async (startIndex, endIndex) => {
+    const result = Array.from(exercises);
+    const [removed] = result.splice(startIndex, 1);
+    result.splice(endIndex, 0, removed);
+    
+    // Rewrite all to enforce re-ordered array
+    await db.transaction('rw', db.exercises, async () => {
+      await db.exercises.clear();
+      await db.exercises.bulkAdd(result);
     });
   };
 
@@ -512,38 +489,46 @@ export const useWorkoutState = () => {
     linkElement.click();
   };
 
-  // Import data from JSON
-  const importData = (jsonData) => {
+  // Import data from JSON into IndexedDB
+  const importData = async (jsonData) => {
     try {
       const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      if (parsed.exercises && Array.isArray(parsed.exercises)) {
-        setExercises(parsed.exercises);
-      }
-      if (parsed.history && Array.isArray(parsed.history)) {
-        setHistory(parsed.history);
-      }
-      if (parsed.preferences) {
-        setPreferences(parsed.preferences);
-      }
+      
+      await db.transaction('rw', [db.exercises, db.history, db.preferences], async () => {
+        if (parsed.exercises && Array.isArray(parsed.exercises)) {
+          await db.exercises.clear();
+          await db.exercises.bulkAdd(parsed.exercises);
+        }
+        if (parsed.history && Array.isArray(parsed.history)) {
+          await db.history.clear();
+          await db.history.bulkAdd(parsed.history);
+        }
+        if (parsed.preferences) {
+          await db.preferences.clear();
+          const prefArray = Object.entries(parsed.preferences).map(([key, value]) => ({ key, value }));
+          await db.preferences.bulkPut(prefArray);
+        }
+      });
       return true;
     } catch (e) {
-      console.error('Error importing data:', e);
+      console.error('Error importing data into IndexedDB:', e);
       return false;
     }
   };
 
   // Reset all data
-  const clearAllData = () => {
-    localStorage.removeItem('hypertrophy_exercises');
-    localStorage.removeItem('hypertrophy_history');
+  const clearAllData = async () => {
+    await db.transaction('rw', [db.exercises, db.history, db.preferences], async () => {
+      await db.exercises.clear();
+      await db.history.clear();
+      await db.preferences.clear();
+      await db.exercises.bulkAdd(DEFAULT_EXERCISES);
+      await db.preferences.add({ key: 'prefLoggingMode', value: 'RPE' });
+    });
     localStorage.removeItem('hypertrophy_current_workout');
-    localStorage.removeItem('hypertrophy_preferences');
     localStorage.removeItem('hypertrophy_rest_end_time');
-    setExercises(DEFAULT_EXERCISES);
-    setHistory([]);
     setCurrentWorkout(null);
-    setPreferences({ prefLoggingMode: 'RPE' });
-    setRestEndTime(null);
+    clearRestTimer();
   };
 
   return {

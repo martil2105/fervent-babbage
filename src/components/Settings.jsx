@@ -102,10 +102,10 @@ export default function Settings({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const result = event.target?.result;
       if (typeof result === 'string') {
-        const success = importData(result);
+        const success = await importData(result);
         if (success) {
           setImportStatus('success');
           setTimeout(() => setImportStatus(null), 3000);
