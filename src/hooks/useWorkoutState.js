@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 // Default exercise definitions with new fields
 const DEFAULT_EXERCISES = [
@@ -188,21 +188,21 @@ export const useWorkoutState = () => {
     }));
   };
 
-  // Rest Timer controls
-  const startRestTimer = (seconds) => {
+  // Rest Timer controls (memoized so effects depending on them don't re-run every render)
+  const startRestTimer = useCallback((seconds) => {
     setRestEndTime(Date.now() + seconds * 1000);
-  };
+  }, []);
 
-  const extendRestTimer = (seconds) => {
+  const extendRestTimer = useCallback((seconds) => {
     setRestEndTime((prev) => {
       const base = prev && prev > Date.now() ? prev : Date.now();
       return base + seconds * 1000;
     });
-  };
+  }, []);
 
-  const clearRestTimer = () => {
+  const clearRestTimer = useCallback(() => {
     setRestEndTime(null);
-  };
+  }, []);
 
   // Helper: Find the last weight logged for an exercise (from working sets only)
   const getLastLoggedWeight = (exerciseId) => {

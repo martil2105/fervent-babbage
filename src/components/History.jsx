@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Calendar, Clock, Trophy, ChevronDown, ChevronUp } from 'lucide-react';
-import { 
-  formatDate, 
-  getSessionVolume, 
-  getExerciseVolume, 
-  getPersonalBests 
+import {
+  formatDate,
+  getSessionVolume,
+  getExerciseVolume,
+  getPersonalBests,
+  getDisplayExercises
 } from '../utils/workoutHelpers';
 
 export default function History({ history, exercises }) {
@@ -118,11 +119,20 @@ export default function History({ history, exercises }) {
                             </span>
                           </div>
                           <div className="history-detail-sets">
-                            {ex.sets.map((set, sIdx) => (
-                              <span key={sIdx} className="history-detail-set-badge">
-                                S{sIdx + 1}: {set.weight}kg × {set.reps}
-                              </span>
-                            ))}
+                            {ex.sets.map((set, sIdx) => {
+                              const skipped = set.completed === false;
+                              return (
+                                <span
+                                  key={sIdx}
+                                  className="history-detail-set-badge"
+                                  title={set.isWarmup ? 'Warm-up (not counted)' : skipped ? 'Not logged (not counted)' : undefined}
+                                  style={set.isWarmup || skipped ? { opacity: 0.5, fontStyle: 'italic' } : undefined}
+                                >
+                                  S{sIdx + 1}: {set.weight}kg × {set.reps}
+                                  {set.isWarmup ? ' · W' : skipped ? ' · skipped' : ''}
+                                </span>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -138,7 +148,7 @@ export default function History({ history, exercises }) {
       {/* SUB-TAB: Personal Bests */}
       {activeSubTab === 'pbs' && (
         <div className="pb-list">
-          {exercises.map((ex) => {
+          {getDisplayExercises(exercises, history).map((ex) => {
             const pb = pbs[ex.id] || { maxWeight: 0, maxSessionVolume: 0 };
             return (
               <div key={ex.id} className="pb-item">

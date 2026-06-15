@@ -13,10 +13,22 @@ export const getSetVolume = (weight, reps, isWarmup = false) => {
   return w * r;
 };
 
-// Calculate total volume load for an exercise (sum of working set volumes)
+// A set counts toward volume/set totals only if it is a working set that was
+// actually logged (checked off). Sets from older data lack a `completed` flag,
+// so only an explicit `completed === false` excludes a set — this keeps migrated
+// history unchanged while ignoring unchecked sets from half-finished workouts.
+export const isCountableSet = (set) => {
+  if (!set) return false;
+  return !set.isWarmup && set.completed !== false;
+};
+
+// Calculate total volume load for an exercise (sum of completed working set volumes)
 export const getExerciseVolume = (sets) => {
   if (!sets || !Array.isArray(sets)) return 0;
-  return sets.reduce((sum, set) => sum + getSetVolume(set.weight, set.reps, set.isWarmup), 0);
+  return sets.reduce(
+    (sum, set) => sum + (isCountableSet(set) ? getSetVolume(set.weight, set.reps, false) : 0),
+    0
+  );
 };
 
 // Calculate total volume load for a workout session
@@ -149,8 +161,8 @@ export const groupSessionsByWeek = (sessions, exercisesList = []) => {
       const configEx = exercisesList.find(e => e.id === ex.exerciseId);
       const mg = configEx?.muscleGroup || ex.muscleGroup || 'Other';
 
-      const workingSets = ex.sets ? ex.sets.filter(s => !s.isWarmup) : [];
-      const vol = workingSets.reduce((sum, s) => sum + getSetVolume(s.weight, s.reps, s.isWarmup), 0);
+      const workingSets = ex.sets ? ex.sets.filter(isCountableSet) : [];
+      const vol = workingSets.reduce((sum, s) => sum + getSetVolume(s.weight, s.reps, false), 0);
       const workingSetCount = workingSets.length;
       
       // Accumulate total volume
@@ -247,7 +259,7 @@ export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef) => {
   const targetMax = lastExerciseData.targetRange?.max || exerciseDef?.maxReps || 12;
   const sets = lastExerciseData.sets;
   
-  const workingSets = sets.filter(s => !s.isWarmup);
+  const workingSets = sets.filter(isCountableSet);
   if (workingSets.length === 0) {
     return {
       type: 'reps',
@@ -288,6 +300,44 @@ export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef) => {
 };
 
 /**
+ * Merge configured exercises with any that appear only in history.
+ * Custom "on-the-fly" exercises and previously-deleted templates are logged into
+ * history but are not in the current config, so they would otherwise be invisible
+ * in the Dashboard breakdown and Personal Bests. This returns the configured
+ * exercises first, followed by any history-only exercises (derived from their most
+ * recent logged session), flagged with isHistorical: true.
+ */
+export const getDisplayExercises = (configExercises = [], sessions = []) => {
+  const result = [...configExercises];
+  const knownIds = new Set(configExercises.map((e) => e.id));
+
+  if (!sessions || !Array.isArray(sessions)) return result;
+
+  // Walk sessions newest-first so the most recent name/target wins for each id
+  const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+  sorted.forEach((session) => {
+    session.exercises.forEach((ex) => {
+      if (!ex.exerciseId || knownIds.has(ex.exerciseId)) return;
+      knownIds.add(ex.exerciseId);
+      result.push({
+        id: ex.exerciseId,
+        name: ex.name || 'Unknown Exercise',
+        minReps: ex.targetRange?.min ?? 0,
+        maxReps: ex.targetRange?.max ?? 0,
+        targetSets: ex.sets?.length || 0,
+        muscleGroup: ex.muscleGroup || 'Other',
+        exerciseType: ex.exerciseType || 'compound',
+        restDuration: ex.restDuration || 120,
+        isCustom: true,
+        isHistorical: true
+      });
+    });
+  });
+
+  return result;
+};
+
+/**
  * Get personal bests for each exercise.
  * Returns: {
  *   [exerciseId]: {
@@ -308,9 +358,9 @@ export const getPersonalBests = (sessions) => {
         pbs[exId] = { maxWeight: 0, maxSessionVolume: 0 };
       }
 
-      // 1. Max Weight in a single set (working set only)
+      // 1. Max Weight in a single set (completed working sets only)
       ex.sets.forEach((set) => {
-        if (set.isWarmup) return;
+        if (!isCountableSet(set)) return;
         const weight = parseFloat(set.weight) || 0;
         if (weight > pbs[exId].maxWeight) {
           pbs[exId].maxWeight = weight;

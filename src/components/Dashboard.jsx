@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { TrendingUp, TrendingDown, Minus, Info, BarChart2, Zap } from 'lucide-react';
 import { 
-  groupSessionsByWeek, 
-  calculateTrend, 
+  groupSessionsByWeek,
+  calculateTrend,
   getProgressionSuggestion,
   getMondayOfDate,
+  getDisplayExercises,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
 
@@ -235,9 +236,11 @@ export default function Dashboard({ history, exercises }) {
           </div>
         ) : (
           <div className="weekly-breakdown-table">
-            {exercises.map((ex) => {
+            {getDisplayExercises(exercises, history).map((ex) => {
               const vol = currentWeekData.exerciseVolume[ex.id] || 0;
               const sets = currentWeekData.exerciseSets[ex.id] || 0;
+              // Hide history-only exercises with no activity this week to avoid clutter
+              if (ex.isHistorical && sets === 0 && vol === 0) return null;
               return (
                 <div key={ex.id} className="weekly-breakdown-row">
                   <div className="weekly-breakdown-info">

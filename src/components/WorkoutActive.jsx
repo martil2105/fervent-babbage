@@ -52,32 +52,30 @@ export default function WorkoutActive({
     if (!restEndTime) return;
 
     let vibrated = false;
+    let autoClearId = null;
 
     const checkTimer = () => {
+      setNow(Date.now());
       const diff = restEndTime - Date.now();
-      if (diff <= 0) {
-        if (!vibrated) {
-          if (navigator.vibrate) {
-            navigator.vibrate([300, 100, 300]);
-          }
-          vibrated = true;
+      if (diff <= 0 && !vibrated) {
+        vibrated = true;
+        if (navigator.vibrate) {
+          navigator.vibrate([300, 100, 300]);
         }
-        
-        // Auto clear after 6 seconds of flashing
-        const clearId = setTimeout(() => {
+        // Auto clear after 6 seconds of flashing (scheduled once)
+        autoClearId = setTimeout(() => {
           clearRestTimer();
         }, 6000);
-        return () => clearTimeout(clearId);
       }
     };
 
     checkTimer();
-    const timerInterval = setInterval(() => {
-      setNow(Date.now());
-      checkTimer();
-    }, 500);
+    const timerInterval = setInterval(checkTimer, 500);
 
-    return () => clearInterval(timerInterval);
+    return () => {
+      clearInterval(timerInterval);
+      if (autoClearId) clearTimeout(autoClearId);
+    };
   }, [restEndTime, clearRestTimer]);
 
   // Format seconds to MM:SS
