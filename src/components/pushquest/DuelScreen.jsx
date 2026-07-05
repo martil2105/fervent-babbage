@@ -90,7 +90,7 @@ export default function DuelScreen({ ghost, onFinish, onAward }) {
       {/* Duel banner */}
       <Card style={{ borderColor: 'var(--border-accent)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', color: 'var(--accent-strong)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Swords size={14} /> GHOST DUEL · vs {ghost.label}
           </span>
           <Badge tone={combo >= 2 ? 'warning' : 'neutral'}>
@@ -100,7 +100,7 @@ export default function DuelScreen({ ghost, onFinish, onAward }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600 }}>
-            <span style={{ color: 'var(--accent)' }}>YOU</span>
+            <span style={{ color: 'var(--accent-strong)' }}>YOU</span>
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{yourVol.toLocaleString()} kg</span>
           </div>
           <ProgressBar value={yourVol} max={ghostVolTotal * 1.1} tone="accent" height={8} />
@@ -111,7 +111,7 @@ export default function DuelScreen({ ghost, onFinish, onAward }) {
           <ProgressBar value={ghostVolPaced} max={ghostVolTotal * 1.1} tone="muted" height={8} />
         </div>
 
-        <div style={{ textAlign: 'center', fontSize: 12, fontWeight: 700, color: lead >= 0 ? 'var(--success)' : 'var(--error)' }}>
+        <div style={{ textAlign: 'center', fontSize: 12, fontWeight: 700, color: lead >= 0 ? 'var(--success-strong)' : 'var(--error-strong)' }}>
           {doneCount === 0 ? 'Complete a set to enter the race' : lead >= 0 ? `You lead by ${lead.toLocaleString()} kg` : `Ghost leads by ${Math.abs(lead).toLocaleString()} kg`}
         </div>
       </Card>
@@ -133,7 +133,7 @@ export default function DuelScreen({ ghost, onFinish, onAward }) {
             const edge = s.done && g && vol(s) > vol(g);
             return (
               <div key={si} style={{ display: 'grid', gridTemplateColumns: '86px 1fr 1fr 38px', gap: 6, alignItems: 'center', opacity: s.done ? 0.75 : 1 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: edge ? 'var(--success)' : 'var(--text-muted)', fontWeight: 600 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: edge ? 'var(--success-strong)' : 'var(--text-muted)', fontWeight: 600 }}>
                   <Ghost size={12} /> {g ? `${g.w} × ${g.r}` : '—'}
                   {edge && <TrendingUp size={12} />}
                 </span>
@@ -142,7 +142,7 @@ export default function DuelScreen({ ghost, onFinish, onAward }) {
                 <button
                   type="button"
                   onClick={() => toggle(ei, si)}
-                  style={{ height: 38, borderRadius: 6, border: '1px solid', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: s.done ? 'var(--success)' : 'var(--border-color)', background: s.done ? 'var(--success-glow)' : 'transparent', color: s.done ? 'var(--success)' : 'var(--text-secondary)' }}
+                  style={{ height: 38, borderRadius: 6, border: '1px solid', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: s.done ? 'var(--success)' : 'var(--border-color)', background: s.done ? 'var(--success-glow)' : 'transparent', color: s.done ? 'var(--success-strong)' : 'var(--text-secondary)' }}
                 >
                   <Check size={16} strokeWidth={3} />
                 </button>

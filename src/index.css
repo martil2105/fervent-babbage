@@ -1,39 +1,46 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
 :root {
-  /* True OLED Black theme optimizations for iPhone 15 Pro Super Retina XDR display */
-  --bg-primary: #000000;
-  --bg-secondary: #0a0a0f;
-  --bg-card: #12121a;
-  --bg-active: #1c1c28;
-  
-  --accent: #6366f1; /* Electric Indigo */
-  --accent-hover: #4f46e5;
-  --accent-glow: rgba(99, 102, 241, 0.15);
-  
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
-  
-  --success: #10b981; /* Emerald Green */
-  --success-glow: rgba(16, 185, 129, 0.15);
-  
-  --warning: #f59e0b; /* Amber */
-  --warning-glow: rgba(245, 158, 11, 0.15);
-  
-  --error: #ef4444; /* Rose Red */
-  --error-glow: rgba(239, 68, 68, 0.15);
-  
-  --border-color: #1a1c2d;
-  
+  /* Verdant — minimalist light theme. Quiet granite neutrals do ~90% of the
+   * work; feather-green is a sparing ~10% accent on actions, progress, reward.
+   * Vivid 500s are FILLS/icons; *-strong variants are text-safe on white. */
+  --bg-primary: var(--surface-canvas);   /* app background  (#F7F8FA) */
+  --bg-secondary: var(--surface-sunken); /* inputs, insets, nav (#EFF1F4) */
+  --bg-card: var(--surface-default);     /* cards (#FFFFFF) */
+  --bg-active: var(--granite-200);       /* pressed / active (#E3E6EB) */
+
+  --accent: var(--feather-500);          /* Feather Green — fills, icons */
+  --accent-hover: var(--feather-600);
+  --accent-glow: var(--feather-50);      /* solid tint for chips / icon bg */
+  --accent-strong: var(--feather-700);   /* accent TEXT / links (AA on white) */
+
+  --text-primary: var(--granite-900);    /* headings / primary text */
+  --text-secondary: var(--granite-600);  /* body-muted (AA) */
+  --text-muted: var(--granite-500);      /* captions */
+
+  --success: var(--feather-500);         /* fill / icon */
+  --success-glow: var(--feather-50);
+  --success-strong: var(--feather-700);  /* success TEXT */
+
+  --warning: var(--fox-500);             /* fill / icon */
+  --warning-glow: var(--fox-50);
+  --warning-strong: var(--fox-700);      /* warning TEXT */
+
+  --error: var(--cardinal-500);          /* fill / icon */
+  --error-glow: var(--cardinal-50);
+  --error-strong: var(--cardinal-600);   /* error TEXT */
+
+  --border-color: var(--border-subtle);  /* hairline (#E3E6EB) */
+
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 20px;
-  
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.7);
-  
+
+  /* Flat, minimal elevation — soft neutral shadows, no chunky 3D. */
+  --shadow-sm: 0 1px 2px rgba(18, 21, 26, 0.06);
+  --shadow-md: 0 4px 12px rgba(18, 21, 26, 0.08);
+  --shadow-lg: 0 12px 28px rgba(18, 21, 26, 0.12);
+
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -45,7 +52,7 @@
 html, body {
   margin: 0;
   padding: 0;
-  background-color: #000000;
+  background-color: var(--bg-primary);
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--text-primary);
   display: flex;
@@ -72,7 +79,7 @@ html, body {
 .app-header {
   position: sticky;
   top: 0;
-  background-color: rgba(0, 0, 0, 0.85); /* OLED black mask */
+  background-color: rgba(247, 248, 250, 0.8); /* light glass */
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; /* Safe area top for notch/Dynamic Island */
@@ -87,7 +94,7 @@ html, body {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  background: linear-gradient(135deg, #a5b4fc, #6366f1);
+  background: linear-gradient(135deg, var(--feather-600), var(--feather-800));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   display: flex;
@@ -113,7 +120,7 @@ html, body {
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  background-color: rgba(10, 10, 15, 0.9);
+  background-color: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--border-color);
@@ -142,7 +149,7 @@ html, body {
 }
 
 .nav-tab.active {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .nav-tab svg {
@@ -170,7 +177,7 @@ html, body {
 }
 
 .card:hover {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: var(--border-strong);
 }
 
 .card-title {
@@ -210,8 +217,8 @@ html, body {
 
 .btn-primary {
   background-color: var(--accent);
-  color: var(--text-primary);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  color: #fff;
+  box-shadow: var(--shadow-btn);
 }
 .btn-primary:hover {
   background-color: var(--accent-hover);
@@ -227,9 +234,9 @@ html, body {
 }
 
 .btn-danger {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: var(--error);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background-color: var(--error-glow);
+  color: var(--error-strong);
+  border: 1px solid var(--cardinal-200);
 }
 .btn-danger:hover {
   background-color: var(--error);
@@ -239,7 +246,7 @@ html, body {
 .btn-success {
   background-color: var(--success);
   color: white;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  box-shadow: var(--shadow-btn);
 }
 
 .btn-icon-only {
@@ -271,7 +278,7 @@ html, body {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .exercise-log-card {
@@ -300,7 +307,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .set-row:last-child {
@@ -420,14 +427,14 @@ html, body {
 
 .metric-trend-badge.up {
   background-color: var(--success-glow);
-  color: var(--success);
+  color: var(--success-strong);
 }
 .metric-trend-badge.down {
   background-color: var(--error-glow);
-  color: var(--error);
+  color: var(--error-strong);
 }
 .metric-trend-badge.flat {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--bg-secondary);
   color: var(--text-secondary);
 }
 
@@ -442,14 +449,14 @@ html, body {
   font-weight: 600;
 }
 
-.trend-pill.up { background-color: var(--success-glow); color: var(--success); }
-.trend-pill.down { background-color: var(--error-glow); color: var(--error); }
+.trend-pill.up { background-color: var(--success-glow); color: var(--success-strong); }
+.trend-pill.down { background-color: var(--error-glow); color: var(--error-strong); }
 .trend-pill.flat { background-color: var(--border-color); color: var(--text-secondary); }
 
 /* Progression Suggestion banner */
 .progression-hint-banner {
   background-color: var(--warning-glow);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid var(--fox-200);
   border-radius: var(--radius-md);
   padding: 14px 16px;
   display: flex;
@@ -466,12 +473,12 @@ html, body {
 .progression-hint-text {
   font-size: 13px;
   line-height: 1.4;
-  color: #ffedd5;
+  color: var(--warning-strong);
 }
 
 .progression-hint-text strong {
-  color: var(--warning);
-  font-weight: 600;
+  color: var(--warning-strong);
+  font-weight: 700;
 }
 
 /* Tab Content Transitions */
@@ -558,7 +565,7 @@ html, body {
 .history-item-volume {
   font-size: 14px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .history-item-exercise-list {
@@ -660,7 +667,7 @@ html, body {
 .pb-weight {
   font-size: 14px;
   font-weight: 700;
-  color: var(--success);
+  color: var(--success-strong);
 }
 
 .pb-volume {
@@ -722,7 +729,7 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  background-color: rgba(18, 21, 26, 0.45);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -810,5 +817,5 @@ html, body {
 .weekly-breakdown-vol {
   font-size: 13px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-strong);
 }

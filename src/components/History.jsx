@@ -114,7 +114,7 @@ export default function History({ history, exercises }) {
                         <div key={idx} className="history-detail-exercise">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                             <span className="history-detail-exercise-name">{ex.name}</span>
-                            <span className="text-xs text-bold" style={{ color: 'var(--accent)' }}>
+                            <span className="text-xs text-bold" style={{ color: 'var(--accent-strong)' }}>
                               {Math.round(exVol)} kg
                             </span>
                           </div>

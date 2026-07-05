@@ -258,7 +258,7 @@ export default function Dashboard({ history, exercises }) {
       {/* 4. Progression Helper Suggestions */}
       <div className="card">
         <h3 className="card-title" style={{ gap: '6px', display: 'flex', alignItems: 'center' }}>
-          <Zap size={18} style={{ color: 'var(--warning)' }} />
+          <Zap size={18} style={{ color: 'var(--warning-strong)' }} />
           Progression Helper
         </h3>
         <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>

@@ -1,0 +1,110 @@
+/* Verdant — Minimalist, Duolingo-inspired color system
+ * Drop-in CSS custom properties. Imported once at the app root (main.jsx),
+ * BEFORE index.css so the app's semantic aliases can reference these ramps.
+ * Ramps are character-named to avoid clashing with framework defaults.
+ */
+:root {
+  /* feather — Primary — actions, progress, reward */
+  --feather-50: #F1FBE7;
+  --feather-100: #DEF5C4;
+  --feather-200: #C0EB92;
+  --feather-300: #9BDE5C;
+  --feather-400: #79D033;
+  --feather-500: #58CC02;
+  --feather-600: #46A302;
+  --feather-700: #377D05;
+  --feather-800: #2C6109;
+  --feather-900: #24500D;
+
+  /* macaw — Secondary — info, calm highlights */
+  --macaw-50: #E9F7FE;
+  --macaw-100: #C9ECFD;
+  --macaw-200: #98DBFB;
+  --macaw-300: #5FC8FA;
+  --macaw-400: #33B8F7;
+  --macaw-500: #1CB0F6;
+  --macaw-600: #0E8FCE;
+  --macaw-700: #0F72A3;
+  --macaw-800: #135C82;
+  --macaw-900: #154C6B;
+
+  /* sun — Tertiary — streaks & stars ONLY */
+  --sun-50: #FFF9E5;
+  --sun-100: #FFEFBA;
+  --sun-200: #FFE185;
+  --sun-300: #FFD44F;
+  --sun-400: #FFCB24;
+  --sun-500: #FFC800;
+  --sun-600: #E0A400;
+  --sun-700: #B37E00;
+  --sun-800: #8A6000;
+  --sun-900: #6B4A00;
+
+  /* cardinal — Danger */
+  --cardinal-50: #FFECEC;
+  --cardinal-100: #FFD1D1;
+  --cardinal-200: #FFACAC;
+  --cardinal-300: #FF8A8A;
+  --cardinal-400: #FF6A6A;
+  --cardinal-500: #FF4B4B;
+  --cardinal-600: #E12D2D;
+  --cardinal-700: #B81E1E;
+  --cardinal-800: #8F1919;
+  --cardinal-900: #6B1414;
+
+  /* fox — Warning */
+  --fox-50: #FFF3E4;
+  --fox-100: #FFE0BD;
+  --fox-200: #FFCB8C;
+  --fox-300: #FFB463;
+  --fox-400: #FFA333;
+  --fox-500: #FF9600;
+  --fox-600: #E07E00;
+  --fox-700: #A85D00;
+  --fox-800: #804700;
+  --fox-900: #5E3400;
+
+  /* granite — Neutral — canvas, surface, border, text */
+  --granite-0: #FFFFFF;
+  --granite-50: #F7F8FA;
+  --granite-100: #EFF1F4;
+  --granite-200: #E3E6EB;
+  --granite-300: #D2D7DE;
+  --granite-400: #AEB4BE;
+  --granite-500: #868D98;
+  --granite-600: #5B626D;
+  --granite-700: #3B424C;
+  --granite-800: #22272E;
+  --granite-900: #12151A;
+
+  /* ---- Semantic surface & text (light theme) ---- */
+  --surface-canvas: var(--granite-50);   /* app background            */
+  --surface-default: var(--granite-0);    /* cards, sheets             */
+  --surface-sunken: var(--granite-100);   /* insets, tracks, code      */
+  --border-subtle: var(--granite-200);    /* hairline card borders     */
+  --border-strong: var(--granite-300);    /* dividers, input borders   */
+
+  --text-heading: var(--granite-900);
+  --text-body: var(--granite-700);
+  --text-muted: var(--granite-500);
+  --text-disabled: var(--granite-400);
+
+  /* ---- Interactive ---- */
+  --interactive: var(--feather-500);        /* primary fills           */
+  --interactive-hover: var(--feather-600);
+  --interactive-active: var(--feather-700);
+  --interactive-text: var(--feather-700);   /* links / accent text     */
+  --focus-ring: var(--feather-500);
+
+  /* ---- Semantic feedback (core / text-safe / tint) ---- */
+  --success: var(--feather-500);  --success-text: var(--feather-700);  --success-tint: var(--feather-50);
+  --danger:  var(--cardinal-500); --danger-text:  var(--cardinal-600); --danger-tint:  var(--cardinal-50);
+  --warning: var(--fox-500);      --warning-text: var(--fox-700);      --warning-tint: var(--fox-50);
+  --info:    var(--macaw-500);    --info-text:    var(--macaw-700);    --info-tint:    var(--macaw-50);
+
+  /* ---- Elevation (flat & minimal — no chunky 3D shadows) ---- */
+  --radius-el: 12px;   /* buttons, inputs, chips   */
+  --radius-card: 16px; /* cards                    */
+  --shadow-btn: 0 1px 2px rgba(18, 21, 26, 0.10);
+  --shadow-card: 0 1px 3px rgba(18, 21, 26, 0.05), 0 1px 2px rgba(18, 21, 26, 0.04);
+}

@@ -502,8 +502,8 @@ export default function Settings({
             backgroundColor: storagePersisted ? 'var(--success-glow)' : 'var(--warning-glow)'
           }}>
             {storagePersisted
-              ? <ShieldCheck size={18} style={{ color: 'var(--success)', flexShrink: 0 }} />
-              : <ShieldAlert size={18} style={{ color: 'var(--warning)', flexShrink: 0 }} />}
+              ? <ShieldCheck size={18} style={{ color: 'var(--success-strong)', flexShrink: 0 }} />
+              : <ShieldAlert size={18} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} />}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span className="text-xs text-bold" style={{ color: storagePersisted ? 'var(--success)' : 'var(--warning)' }}>
                 {storagePersisted ? 'Persistent storage on' : 'Best-effort storage'}
@@ -554,12 +554,12 @@ export default function Settings({
           />
 
           {importStatus === 'success' && (
-            <div className="text-xs text-bold" style={{ color: 'var(--success)', marginTop: '4px' }}>
+            <div className="text-xs text-bold" style={{ color: 'var(--success-strong)', marginTop: '4px' }}>
               ✓ Data imported successfully!
             </div>
           )}
           {importStatus === 'error' && (
-            <div className="text-xs text-bold" style={{ color: 'var(--error)', marginTop: '4px' }}>
+            <div className="text-xs text-bold" style={{ color: 'var(--error-strong)', marginTop: '4px' }}>
               ✗ Error importing data. Make sure it's a valid backup file.
             </div>
           )}
@@ -568,7 +568,7 @@ export default function Settings({
 
       {/* 4. Danger Zone */}
       <div className="card" style={{ borderColor: 'rgba(239, 68, 68, 0.3)' }}>
-        <h3 className="card-title" style={{ color: 'var(--error)' }}>Danger Zone</h3>
+        <h3 className="card-title" style={{ color: 'var(--error-strong)' }}>Danger Zone</h3>
         <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
           Resetting the app will permanently delete all your custom exercises, set histories, and active workouts. This cannot be undone.
         </p>
@@ -581,7 +581,7 @@ export default function Settings({
       {showResetConfirm && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
-            <h3 style={{ margin: 0, color: 'var(--error)' }}>Reset All Data?</h3>
+            <h3 style={{ margin: 0, color: 'var(--error-strong)' }}>Reset All Data?</h3>
             <p className="text-muted" style={{ margin: 0, fontSize: '14px', lineHeight: '1.4' }}>
               Are you absolutely sure you want to clear all data? This will erase your entire workout history and restore the default settings.
             </p>

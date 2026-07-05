@@ -10,42 +10,46 @@
    ============================================================================ */
 
 .push-quest {
-  /* ---- Duolingo dark surfaces (teal-charcoal ramp) ---- */
-  --bg-primary: #131f24;
-  --bg-secondary: #1b2b32;
-  --bg-card: #202f36;
-  --bg-active: #2b3d45;
-  --border-color: #37464f;
+  /* ---- Verdant light surfaces (granite ramp) ---- */
+  --bg-primary: var(--surface-canvas);
+  --bg-secondary: var(--surface-sunken);
+  --bg-card: var(--surface-default);
+  --bg-active: var(--granite-200);
+  --border-color: var(--border-subtle);
 
-  /* ---- Text ramp ---- */
-  --text-primary: #f1f7fb;
-  --text-secondary: #93a1a8;
-  --text-muted: #5a6e78;
+  /* ---- Text ramp (dark on light) ---- */
+  --text-primary: var(--granite-900);
+  --text-secondary: var(--granite-600);
+  --text-muted: var(--granite-500);
 
   /* ---- Feather Green — primary / YOU / path / buttons / wins ---- */
-  --accent: #58cc02;
-  --accent-hover: #46a302;
-  --accent-glow: rgba(88, 204, 2, 0.16);
-  --border-accent: rgba(88, 204, 2, 0.35);
-  --shadow-accent: 0 4px 12px rgba(88, 204, 2, 0.35);
-  --success: #58cc02;
-  --success-glow: rgba(88, 204, 2, 0.16);
-  --shadow-success: 0 4px 12px rgba(88, 204, 2, 0.35);
+  --accent: var(--feather-500);
+  --accent-hover: var(--feather-600);
+  --accent-glow: var(--feather-50);
+  --accent-strong: var(--feather-700);   /* accent TEXT on light (AA) */
+  --border-accent: var(--feather-200);
+  --shadow-accent: 0 2px 8px rgba(88, 204, 2, 0.28);
+  --success: var(--feather-500);
+  --success-glow: var(--feather-50);
+  --success-strong: var(--feather-700);
+  --shadow-success: 0 2px 8px rgba(88, 204, 2, 0.28);
 
-  /* ---- Bee Gold — streak flame / XP / crowns / quests ---- */
-  --warning: #ffc800;
-  --warning-glow: rgba(255, 200, 0, 0.16);
+  /* ---- Sun Gold — streak flame / XP / crowns (glyphs & fills only) ---- */
+  --warning: var(--sun-500);
+  --warning-glow: var(--sun-50);
+  --warning-strong: var(--sun-700);      /* gold TEXT on light */
 
   /* ---- Cardinal Red — danger ---- */
-  --error: #ff4b4b;
-  --error-glow: rgba(255, 75, 75, 0.16);
+  --error: var(--cardinal-500);
+  --error-glow: var(--cardinal-50);
+  --error-strong: var(--cardinal-600);
 
   /* ---- Gradients / glass ---- */
-  --gradient-title: linear-gradient(135deg, #89e219, #58cc02);
-  --gradient-timer: linear-gradient(135deg, #202f36, #1b2b32);
-  --glass-header: rgba(19, 31, 36, 0.85);
-  --glass-nav: rgba(27, 43, 50, 0.9);
-  --glass-overlay: rgba(11, 18, 21, 0.8);
+  --gradient-title: linear-gradient(135deg, var(--feather-500), var(--feather-700));
+  --gradient-timer: linear-gradient(135deg, var(--granite-0), var(--granite-100));
+  --glass-header: rgba(247, 248, 250, 0.85);
+  --glass-nav: rgba(255, 255, 255, 0.9);
+  --glass-overlay: rgba(18, 21, 26, 0.6);
 
   /* ---- Spacing scale (4px-derived) ---- */
   --space-1: 4px;

@@ -87,7 +87,7 @@ export default function PushQuest({ history = [], exercises = [] }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--gradient-title)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
           <Dumbbell size={20} style={{ transform: 'rotate(-45deg)', color: '#58cc02', WebkitTextFillColor: 'initial' }} /> PUSH QUEST
         </h2>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: 'var(--warning-glow)', color: 'var(--warning)', border: '1px solid rgba(255,200,0,.35)', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: 'var(--warning-glow)', color: 'var(--warning-strong)', border: '1px solid var(--sun-200)', fontVariantNumeric: 'tabular-nums' }}>
           <Flame size={13} /> {player.streak}
         </span>
       </div>
@@ -103,7 +103,7 @@ export default function PushQuest({ history = [], exercises = [] }) {
                 key={o.id}
                 type="button"
                 onClick={() => setGhostSource(o.id)}
-                style={{ cursor: 'pointer', border: `1px solid ${on ? 'var(--border-accent)' : 'var(--border-color)'}`, background: on ? 'var(--accent-glow)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: 600, fontSize: 11, padding: '3px 10px', borderRadius: 20 }}
+                style={{ cursor: 'pointer', border: `1px solid ${on ? 'var(--border-accent)' : 'var(--border-color)'}`, background: on ? 'var(--accent-glow)' : 'transparent', color: on ? 'var(--accent-strong)' : 'var(--text-secondary)', fontWeight: 600, fontSize: 11, padding: '3px 10px', borderRadius: 20 }}
               >
                 {o.label}
               </button>

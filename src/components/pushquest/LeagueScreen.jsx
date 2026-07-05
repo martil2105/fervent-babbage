@@ -27,7 +27,7 @@ export default function LeagueScreen({ leagueRows = [], achievements = [] }) {
           {rows.length === 0
             ? 'Log a session to enter this week onto the table.'
             : nextUp
-              ? <>Out-lift <b style={{ color: 'var(--accent)' }}>{nextUp.label}</b> ({nextUp.vol.toLocaleString()} kg) to climb.</>
+              ? <>Out-lift <b style={{ color: 'var(--accent-strong)' }}>{nextUp.label}</b> ({nextUp.vol.toLocaleString()} kg) to climb.</>
               : 'You top the table — set a new all-time week.'}
         </p>
       </Card>
@@ -40,13 +40,13 @@ export default function LeagueScreen({ leagueRows = [], achievements = [] }) {
               const now = r.tier === 'now';
               return (
                 <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 14, border: `1px solid ${now ? 'var(--border-accent)' : 'var(--border-color)'}`, background: now ? 'var(--accent-glow)' : 'var(--bg-secondary)' }}>
-                  <span style={{ width: 20, fontSize: 13, fontWeight: 700, color: i === 0 ? 'var(--warning)' : 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                  <span style={{ width: 20, fontSize: 13, fontWeight: 700, color: i === 0 ? 'var(--warning-strong)' : 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
                   <span style={{ display: 'flex', width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border-color)', alignItems: 'center', justifyContent: 'center' }}>
                     {now ? <Dumbbell size={14} style={{ color: 'var(--accent)' }} /> : <Ghost size={14} style={{ color: 'var(--text-muted)' }} />}
                   </span>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: now ? 700 : 600 }}>
-                      <span style={{ color: now ? 'var(--accent)' : 'var(--text-primary)' }}>{r.label}</span>
+                      <span style={{ color: now ? 'var(--accent-strong)' : 'var(--text-primary)' }}>{r.label}</span>
                       <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.vol.toLocaleString()} kg</span>
                     </div>
                     <ProgressBar value={r.vol} max={leader.vol} tone={now ? 'accent' : 'muted'} height={4} />

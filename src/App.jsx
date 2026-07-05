@@ -74,12 +74,12 @@ export default function App() {
             onClick={() => setActiveTab('workout')}
             style={{ 
               backgroundColor: 'var(--success-glow)', 
-              color: 'var(--success)', 
+              color: 'var(--success-strong)',
               fontSize: '11px', 
               fontWeight: 600, 
               padding: '4px 10px', 
               borderRadius: '20px', 
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              border: '1px solid var(--feather-200)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',

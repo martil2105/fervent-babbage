@@ -80,10 +80,10 @@ export function Button({
     sm: { fontSize: 'var(--text-xs)', padding: '6px 12px', borderRadius: 'var(--radius-sm)' },
   };
   const variants = {
-    primary: { backgroundColor: 'var(--accent)', color: 'var(--text-primary)', boxShadow: 'var(--shadow-accent)' },
+    primary: { backgroundColor: 'var(--accent)', color: '#fff', boxShadow: 'var(--shadow-accent)' },
     secondary: { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' },
     success: { backgroundColor: 'var(--success)', color: '#ffffff', boxShadow: 'var(--shadow-success)' },
-    danger: { backgroundColor: 'var(--error-glow)', color: 'var(--error)', border: '1px solid rgba(255, 75, 75, 0.25)' },
+    danger: { backgroundColor: 'var(--error-glow)', color: 'var(--error-strong)', border: '1px solid var(--cardinal-200)' },
     ghost: { background: 'transparent', color: 'var(--text-secondary)' },
   };
   const press = (v) => (e) => { if (!disabled) e.currentTarget.style.transform = v; };
@@ -110,10 +110,10 @@ export function Button({
 export function Badge({ children, tone = 'neutral', style = {}, ...rest }) {
   const tones = {
     neutral: { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' },
-    accent: { backgroundColor: 'var(--accent-glow)', color: 'var(--accent)', border: '1px solid var(--border-accent)' },
-    success: { backgroundColor: 'var(--success-glow)', color: 'var(--success)', border: '1px solid var(--border-accent)' },
-    warning: { backgroundColor: 'var(--warning-glow)', color: 'var(--warning)', border: '1px solid rgba(255, 200, 0, 0.3)' },
-    error: { backgroundColor: 'var(--error-glow)', color: 'var(--error)', border: '1px solid rgba(255, 75, 75, 0.3)' },
+    accent: { backgroundColor: 'var(--accent-glow)', color: 'var(--accent-strong)', border: '1px solid var(--border-accent)' },
+    success: { backgroundColor: 'var(--success-glow)', color: 'var(--success-strong)', border: '1px solid var(--border-accent)' },
+    warning: { backgroundColor: 'var(--warning-glow)', color: 'var(--warning-strong)', border: '1px solid var(--sun-200)' },
+    error: { backgroundColor: 'var(--error-glow)', color: 'var(--error-strong)', border: '1px solid var(--cardinal-200)' },
   };
   return (
     <span
@@ -278,7 +278,7 @@ export function SubNav({ items = [], active, onChange, style = {} }) {
               fontSize: 'var(--text-2xs)',
               fontWeight: 'var(--weight-semibold)',
               backgroundColor: on ? 'var(--accent-glow)' : 'transparent',
-              color: on ? 'var(--accent)' : 'var(--text-secondary)',
+              color: on ? 'var(--accent-strong)' : 'var(--text-secondary)',
               transition: 'var(--transition)',
             }}
           >

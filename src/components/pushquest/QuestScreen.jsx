@@ -79,7 +79,7 @@ function Node({ node, index, onStart }) {
     <div onClick={node.status === 'current' ? onStart : undefined} style={{ ...base, ...styles[node.status] }}>
       {icons[node.status]}
       {node.crown ? (
-        <span style={{ position: 'absolute', top: -7, right: -9, background: 'var(--bg-primary)', border: '1px solid rgba(255,200,0,.5)', borderRadius: 20, padding: '1px 6px', display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 700, color: 'var(--warning)' }}>
+        <span style={{ position: 'absolute', top: -7, right: -9, background: 'var(--bg-primary)', border: '1px solid rgba(255,200,0,.5)', borderRadius: 20, padding: '1px 6px', display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 700, color: 'var(--warning-strong)' }}>
           <Crown size={10} /> {node.crown}
         </span>
       ) : null}
@@ -106,8 +106,8 @@ export default function QuestScreen({ player, questProgress, path = [], ghost, o
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Stats bar */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-        <div style={statChip}><Flame size={18} style={{ color: 'var(--warning)' }} /><b style={{ color: 'var(--warning)' }}>{player.streak}</b><span style={chipCap}>day streak</span></div>
-        <div style={statChip}><Zap size={18} style={{ color: 'var(--accent)' }} /><b style={{ color: 'var(--accent)' }}>{player.xp.toLocaleString()}</b><span style={chipCap}>XP</span></div>
+        <div style={statChip}><Flame size={18} style={{ color: 'var(--warning)' }} /><b style={{ color: 'var(--warning-strong)' }}>{player.streak}</b><span style={chipCap}>day streak</span></div>
+        <div style={statChip}><Zap size={18} style={{ color: 'var(--accent)' }} /><b style={{ color: 'var(--accent-strong)' }}>{player.xp.toLocaleString()}</b><span style={chipCap}>XP</span></div>
         <div style={statChip}><Shield size={18} style={{ color: 'var(--text-secondary)' }} /><b>{player.league}</b><span style={chipCap}>league</span></div>
       </div>
 
@@ -117,7 +117,7 @@ export default function QuestScreen({ player, questProgress, path = [], ghost, o
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45, color: 'var(--text-secondary)' }}>
             {ghost ? (
-              <>Your last ghost lifted <b style={{ color: 'var(--text-primary)' }}>{ghost.totalVolume.toLocaleString()} kg</b>. Beat it today and your streak hits <b style={{ color: 'var(--warning)' }}>{player.streak + 1}</b>.</>
+              <>Your last ghost lifted <b style={{ color: 'var(--text-primary)' }}>{ghost.totalVolume.toLocaleString()} kg</b>. Beat it today and your streak hits <b style={{ color: 'var(--warning-strong)' }}>{player.streak + 1}</b>.</>
             ) : (
               <>No ghost yet — log a push session and your past self becomes the rival to chase.</>
             )}
@@ -152,7 +152,7 @@ export default function QuestScreen({ player, questProgress, path = [], ghost, o
       <Card style={{ padding: 0, overflow: 'hidden' }} bodyStyle={{ gap: 0 }}>
         <div style={{ background: 'var(--accent-glow)', borderBottom: '1px solid var(--border-accent)', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', color: 'var(--accent)' }}>PUSH BLOCK · THIS WEEK</div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', color: 'var(--accent-strong)' }}>PUSH BLOCK · THIS WEEK</div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
               {doneCount} {doneCount === 1 ? 'session' : 'sessions'} done — finish the week to defend {player.league}
             </div>

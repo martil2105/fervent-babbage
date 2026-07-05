@@ -95,7 +95,7 @@ export default function WorkoutActive({
         <div className="empty-state">
           <div style={{
             background: 'var(--accent-glow)',
-            color: 'var(--accent)',
+            color: 'var(--accent-strong)',
             padding: '20px',
             borderRadius: '50%',
             marginBottom: '10px',
@@ -153,7 +153,7 @@ export default function WorkoutActive({
         particleCount: 120,
         spread: 70,
         origin: { y: 0.75 },
-        colors: ['#6366f1', '#10b981', '#f59e0b', '#f43f5e']
+        colors: ['#58CC02', '#1CB0F6', '#FFC800', '#FF4B4B']
       });
     }
   };
@@ -217,7 +217,7 @@ export default function WorkoutActive({
                 </span>
                 {suggestion && suggestion.type !== 'initial' && (
                   <span className="text-xs text-bold" style={{
-                    color: suggestion.type === 'weight' ? 'var(--success)' : suggestion.type === 'hold' ? 'var(--accent)' : 'var(--warning)',
+                    color: suggestion.type === 'weight' ? 'var(--success-strong)' : suggestion.type === 'hold' ? 'var(--accent-strong)' : 'var(--warning-strong)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '2px'
@@ -241,7 +241,7 @@ export default function WorkoutActive({
                   <span className="text-xs text-bold" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-secondary)' }}>
                     <Ghost size={13} /> Last time · {formatDate(last.timestamp)}
                   </span>
-                  <span className="text-xs text-bold" style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  <span className="text-xs text-bold" style={{ color: 'var(--success-strong)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                     <TrendingUp size={12} /> Beat it
                   </span>
                 </div>
@@ -260,8 +260,8 @@ export default function WorkoutActive({
                       }}>
                         <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{s.weight}</span>×{s.reps}
                         {aim
-                          ? <span style={{ color: 'var(--success)' }}> → aim {aim}</span>
-                          : <span style={{ color: 'var(--warning)' }}> → +{weightStep}kg</span>}
+                          ? <span style={{ color: 'var(--success-strong)' }}> → aim {aim}</span>
+                          : <span style={{ color: 'var(--warning-strong)' }}> → +{weightStep}kg</span>}
                       </span>
                     );
                   })}
@@ -294,7 +294,7 @@ export default function WorkoutActive({
               {ex.sets.map((set, idx) => (
                 <div key={idx} className="set-row" style={{ 
                   opacity: set.completed ? 0.6 : 1,
-                  backgroundColor: set.completed ? 'rgba(255, 255, 255, 0.01)' : 'transparent'
+                  backgroundColor: set.completed ? 'var(--bg-secondary)' : 'transparent'
                 }}>
                   {/* 1. Warmup Toggle */}
                   <button 
@@ -305,7 +305,7 @@ export default function WorkoutActive({
                       borderRadius: '6px', 
                       border: '1px solid var(--border-color)',
                       backgroundColor: set.isWarmup ? 'var(--warning-glow)' : 'transparent',
-                      color: set.isWarmup ? 'var(--warning)' : 'var(--text-secondary)',
+                      color: set.isWarmup ? 'var(--warning-strong)' : 'var(--text-secondary)',
                       cursor: 'pointer',
                       height: '38px',
                       fontWeight: 700,
@@ -433,7 +433,7 @@ export default function WorkoutActive({
                       border: '1px solid',
                       borderColor: set.completed ? 'var(--success)' : 'var(--border-color)',
                       backgroundColor: set.completed ? 'var(--success-glow)' : 'transparent',
-                      color: set.completed ? 'var(--success)' : 'var(--text-secondary)',
+                      color: set.completed ? 'var(--success-strong)' : 'var(--text-secondary)',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
@@ -561,11 +561,11 @@ export default function WorkoutActive({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Clock size={20} style={{
-              color: isFlashing ? 'var(--warning)' : 'var(--accent)',
+              color: isFlashing ? 'var(--warning-strong)' : 'var(--accent)',
               animation: timerSeconds > 0 ? 'spin 10s linear infinite' : 'none'
             }} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span className="text-xs text-bold" style={{ color: isFlashing ? 'var(--warning)' : 'var(--text-secondary)' }}>
+              <span className="text-xs text-bold" style={{ color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)' }}>
                 {isFlashing ? 'REST COMPLETE!' : 'RESTING'}
               </span>
               <span style={{ fontSize: '18px', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
