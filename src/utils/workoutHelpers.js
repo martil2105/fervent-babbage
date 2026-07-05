@@ -221,6 +221,32 @@ export const calculateTrend = (currentVolume, previousVolume) => {
 };
 
 /**
+ * Find the most recent completed session that logged a given exercise, and
+ * return its working sets as a tidy [{ weight, reps }] list (warmups excluded).
+ * Sessions are searched newest-first. Returns null when the exercise has never
+ * been logged. Used to show "last time you did X" and to build the duel ghost.
+ */
+export const getLastSessionSets = (exerciseId, sessions) => {
+  if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return null;
+  const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+  for (const session of sorted) {
+    const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
+    if (ex && ex.sets && ex.sets.length > 0) {
+      const working = ex.sets.filter((s) => !s.isWarmup);
+      const source = working.length > 0 ? working : ex.sets;
+      return {
+        timestamp: session.timestamp,
+        sets: source.map((s) => ({
+          weight: parseFloat(s.weight) || 0,
+          reps: parseInt(s.reps) || 0
+        }))
+      };
+    }
+  }
+  return null;
+};
+
+/**
  * Progression Helper
  * Only suggest weight increase if all working sets hit the top of the rep range
  * AND the last working set's RPE was <= 9 (i.e. there was room/RIR >= 1).

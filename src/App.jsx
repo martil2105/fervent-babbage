@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { BarChart2, Dumbbell, Calendar, Settings as SettingsIcon } from 'lucide-react';
+import { BarChart2, Dumbbell, Calendar, Settings as SettingsIcon, Swords } from 'lucide-react';
 import { useWorkoutState } from './hooks/useWorkoutState';
 import Dashboard from './components/Dashboard';
 import WorkoutActive from './components/WorkoutActive';
 import History from './components/History';
 import Settings from './components/Settings';
+import PushQuest from './components/pushquest/PushQuest';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'workout' | 'history' | 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'workout' | 'quest' | 'history' | 'settings'
   const workoutState = useWorkoutState();
 
   const { currentWorkout } = workoutState;
@@ -35,6 +36,8 @@ export default function App() {
             clearRestTimer={workoutState.clearRestTimer}
           />
         );
+      case 'quest':
+        return <PushQuest history={workoutState.history} exercises={workoutState.exercises} />;
       case 'history':
         return <History history={workoutState.history} exercises={workoutState.exercises} />;
       case 'settings':
@@ -131,7 +134,15 @@ export default function App() {
           )}
         </button>
 
-        <button 
+        <button
+          className={`nav-tab ${activeTab === 'quest' ? 'active' : ''}`}
+          onClick={() => setActiveTab('quest')}
+        >
+          <Swords />
+          <span>Quest</span>
+        </button>
+
+        <button
           className={`nav-tab ${activeTab === 'history' ? 'active' : ''}`}
           onClick={() => setActiveTab('history')}
         >

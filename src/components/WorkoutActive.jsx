@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Play, Check, Trash2, Plus, X, Dumbbell, Clock } from 'lucide-react';
+import { Play, Check, Trash2, Plus, X, Dumbbell, Clock, Ghost, TrendingUp } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { getProgressionSuggestion } from '../utils/workoutHelpers';
+import { getProgressionSuggestion, getLastSessionSets, formatDate } from '../utils/workoutHelpers';
 
 export default function WorkoutActive({ 
   currentWorkout, 
@@ -117,13 +117,26 @@ export default function WorkoutActive({
     );
   }
 
-  // Weight adjust helpers
-  const handleWeightChange = (exId, setIdx, currentVal, change) => {
-    const parsed = parseFloat(currentVal) || 0;
-    const newVal = Math.max(0, parsed + change);
-    const rounded = Math.round(newVal * 100) / 100;
-    updateSet(exId, setIdx, 'weight', rounded);
+  // Weight adjust helpers — whole kilograms only. The +/- buttons jump by the
+  // exercise's own weightStep, and any typed value is snapped to a whole number
+  // so options like "2 kg" never appear when you're working at 26 kg.
+  const handleWeightChange = (exId, setIdx, currentVal, delta) => {
+    const base = Math.round(parseFloat(currentVal) || 0);
+    const newVal = Math.max(0, base + delta);
+    updateSet(exId, setIdx, 'weight', newVal);
   };
+
+  const handleWeightInput = (exId, setIdx, raw) => {
+    if (raw === '') {
+      updateSet(exId, setIdx, 'weight', '');
+      return;
+    }
+    const rounded = Math.round(parseFloat(raw));
+    updateSet(exId, setIdx, 'weight', Number.isNaN(rounded) ? 0 : Math.max(0, rounded));
+  };
+
+  // Fallback increment for active sessions started before weightStep existed.
+  const stepFor = (ex) => ex.weightStep || (ex.exerciseType === 'isolation' ? 1 : 2);
 
   // Reps adjust helpers
   const handleRepsChange = (exId, setIdx, currentVal, change) => {
@@ -175,7 +188,13 @@ export default function WorkoutActive({
       {currentWorkout.exercises.map((ex) => {
         const mockDef = { maxReps: ex.targetRange.max };
         const suggestion = getProgressionSuggestion(ex.exerciseId, history, mockDef);
-        
+        const weightStep = stepFor(ex);
+        const last = getLastSessionSets(ex.exerciseId, history);
+        // Per-set target: beat last time's reps by one, or if you already hit the
+        // top of the rep range last time, the goal becomes adding weight.
+        const repTarget = (prevReps) =>
+          prevReps >= ex.targetRange.max ? null : prevReps + 1;
+
         return (
           <div key={ex.exerciseId} className="card exercise-log-card" style={{
             borderLeftColor: ex.exerciseType === 'isolation' ? 'var(--warning)' : 'var(--accent)'
@@ -209,10 +228,51 @@ export default function WorkoutActive({
               </div>
             </div>
 
+            {/* Last session reference — your only rival is your past self */}
+            {last && last.sets.length > 0 && (
+              <div style={{
+                backgroundColor: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '8px 10px',
+                marginBottom: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span className="text-xs text-bold" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-secondary)' }}>
+                    <Ghost size={13} /> Last time · {formatDate(last.timestamp)}
+                  </span>
+                  <span className="text-xs text-bold" style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    <TrendingUp size={12} /> Beat it
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {last.sets.map((s, i) => {
+                    const aim = repTarget(s.reps);
+                    return (
+                      <span key={i} style={{
+                        fontSize: '11px',
+                        fontVariantNumeric: 'tabular-nums',
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        padding: '3px 7px',
+                        color: 'var(--text-secondary)'
+                      }}>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{s.weight}</span>×{s.reps}
+                        {aim
+                          ? <span style={{ color: 'var(--success)' }}> → aim {aim}</span>
+                          : <span style={{ color: 'var(--warning)' }}> → +{weightStep}kg</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Set Table header */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '44px 1fr 1fr 60px 36px 24px', 
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '44px 1fr 1fr 60px 36px 24px',
               gap: '8px',
               fontSize: '11px', 
               color: 'var(--text-secondary)',
@@ -258,24 +318,26 @@ export default function WorkoutActive({
                   
                   {/* 2. Weight Control */}
                   <div className="input-control">
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       className="input-btn"
-                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, -2.5)}
+                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, -weightStep)}
                       style={{ width: '20px' }}
                     >
                       -
                     </button>
-                    <input 
-                      type="number" 
-                      step="0.5" 
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      step={weightStep}
+                      min="0"
                       value={set.weight}
-                      onChange={(e) => updateSet(ex.exerciseId, idx, 'weight', e.target.value)}
+                      onChange={(e) => handleWeightInput(ex.exerciseId, idx, e.target.value)}
                     />
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       className="input-btn"
-                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, 2.5)}
+                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, weightStep)}
                       style={{ width: '20px' }}
                     >
                       +

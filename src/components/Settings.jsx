@@ -23,6 +23,7 @@ export default function Settings({
   const [editMuscleGroup, setEditMuscleGroup] = useState('Other');
   const [editExerciseType, setEditExerciseType] = useState('compound');
   const [editRestDuration, setEditRestDuration] = useState(120);
+  const [editWeightStep, setEditWeightStep] = useState(2);
 
   // New exercise state
   const [newName, setNewName] = useState('');
@@ -32,7 +33,11 @@ export default function Settings({
   const [newMuscleGroup, setNewMuscleGroup] = useState('Shoulders');
   const [newExerciseType, setNewExerciseType] = useState('compound');
   const [newRestDuration, setNewRestDuration] = useState(120);
+  const [newWeightStep, setNewWeightStep] = useState(2);
   const [showAddNew, setShowAddNew] = useState(false);
+
+  // Whole-kg increment the +/- weight buttons jump by during a workout.
+  const stepForType = (type) => (type === 'isolation' ? 1 : 2);
 
   // Import file ref
   const fileInputRef = useRef(null);
@@ -50,6 +55,7 @@ export default function Settings({
     setEditMuscleGroup(ex.muscleGroup || 'Other');
     setEditExerciseType(ex.exerciseType || 'compound');
     setEditRestDuration(ex.restDuration || 120);
+    setEditWeightStep(ex.weightStep || stepForType(ex.exerciseType));
   };
 
   const cancelEditing = () => {
@@ -64,7 +70,8 @@ export default function Settings({
       maxReps: parseInt(editMaxReps) || 12,
       muscleGroup: editMuscleGroup,
       exerciseType: editExerciseType,
-      restDuration: parseInt(editRestDuration) || 120
+      restDuration: parseInt(editRestDuration) || 120,
+      weightStep: Math.max(1, parseInt(editWeightStep) || stepForType(editExerciseType))
     });
     setEditingId(null);
   };
@@ -73,15 +80,16 @@ export default function Settings({
     e.preventDefault();
     if (!newName.trim()) return;
     addExerciseToConfig(
-      newName, 
-      newSets, 
-      newMinReps, 
-      newMaxReps, 
-      newMuscleGroup, 
-      newExerciseType, 
-      newRestDuration
+      newName,
+      newSets,
+      newMinReps,
+      newMaxReps,
+      newMuscleGroup,
+      newExerciseType,
+      newRestDuration,
+      newWeightStep
     );
-    
+
     // Reset state
     setNewName('');
     setNewSets(4);
@@ -90,6 +98,7 @@ export default function Settings({
     setNewMuscleGroup('Shoulders');
     setNewExerciseType('compound');
     setNewRestDuration(120);
+    setNewWeightStep(2);
     setShowAddNew(false);
   };
 
@@ -203,8 +212,9 @@ export default function Settings({
                   value={newExerciseType}
                   onChange={(e) => {
                     setNewExerciseType(e.target.value);
-                    // Autofill rest default
+                    // Autofill rest + weight-step defaults for the chosen type
                     setNewRestDuration(e.target.value === 'isolation' ? 90 : 120);
+                    setNewWeightStep(stepForType(e.target.value));
                   }}
                 >
                   <option value="compound">Compound (Multi-joint)</option>
@@ -257,18 +267,35 @@ export default function Settings({
               </div>
               <div className="form-group">
                 <label htmlFor="global-ex-max-reps">Max Target Reps</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="global-ex-max-reps"
-                  className="form-input" 
-                  min="1" 
-                  value={newMaxReps} 
-                  onChange={(e) => setNewMaxReps(e.target.value)} 
-                  required 
+                  className="form-input"
+                  min="1"
+                  value={newMaxReps}
+                  onChange={(e) => setNewMaxReps(e.target.value)}
+                  required
                 />
               </div>
             </div>
-            
+
+            <div className="form-group">
+              <label htmlFor="global-ex-step">Weight Step (kg)</label>
+              <input
+                type="number"
+                id="global-ex-step"
+                className="form-input"
+                min="1"
+                step="1"
+                value={newWeightStep}
+                onChange={(e) => setNewWeightStep(e.target.value)}
+                required
+              />
+              <span className="text-xs text-muted" style={{ marginTop: '2px' }}>
+                How much the +/- buttons change the weight during a workout. Whole kg only.
+              </span>
+            </div>
+
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddNew(false)}>
                 Cancel
@@ -318,6 +345,7 @@ export default function Settings({
                         onChange={(e) => {
                           setEditExerciseType(e.target.value);
                           setEditRestDuration(e.target.value === 'isolation' ? 90 : 120);
+                          setEditWeightStep(stepForType(e.target.value));
                         }}
                       >
                         <option value="compound">Compound</option>
@@ -359,13 +387,25 @@ export default function Settings({
                     </div>
                     <div className="form-group">
                       <label>Max Reps</label>
-                      <input 
-                        type="number" 
+                      <input
+                        type="number"
                         className="form-input"
-                        value={editMaxReps} 
-                        onChange={(e) => setEditMaxReps(e.target.value)} 
+                        value={editMaxReps}
+                        onChange={(e) => setEditMaxReps(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Weight Step (kg)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      min="1"
+                      step="1"
+                      value={editWeightStep}
+                      onChange={(e) => setEditWeightStep(e.target.value)}
+                    />
                   </div>
 
                   <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
@@ -398,7 +438,7 @@ export default function Settings({
                     </span>
                   </div>
                   <span className="text-xs text-muted">
-                    {ex.targetSets} sets • {ex.minReps}–{ex.maxReps} reps • Rest: {ex.restDuration || (ex.exerciseType === 'isolation' ? 90 : 120)}s
+                    {ex.targetSets} sets • {ex.minReps}–{ex.maxReps} reps • Rest: {ex.restDuration || (ex.exerciseType === 'isolation' ? 90 : 120)}s • ±{ex.weightStep || stepForType(ex.exerciseType)}kg
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '4px' }}>

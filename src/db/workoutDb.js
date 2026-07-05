@@ -9,6 +9,16 @@ db.version(1).stores({
   preferences: 'key' // key-value table for preferences
 });
 
+// v2 — PUSH Quest game layer: a key/value store for XP, streak, and
+// last-trained bookkeeping. Existing data is preserved on upgrade; the new
+// store is simply created empty for users coming from v1.
+db.version(2).stores({
+  exercises: 'id, name, muscleGroup, exerciseType',
+  history: 'id, timestamp',
+  preferences: 'key',
+  gameState: 'key' // key-value table for game progression (xp, streak, ...)
+});
+
 // Seed default exercises when database is created for the first time
 db.on('populate', () => {
   db.exercises.bulkAdd([
@@ -21,7 +31,8 @@ db.on('populate', () => {
       isCustom: false,
       muscleGroup: 'Shoulders',
       exerciseType: 'compound',
-      restDuration: 120
+      restDuration: 120,
+      weightStep: 2
     },
     {
       id: 'lateral-raises',
@@ -32,7 +43,8 @@ db.on('populate', () => {
       isCustom: false,
       muscleGroup: 'Shoulders',
       exerciseType: 'isolation',
-      restDuration: 90
+      restDuration: 90,
+      weightStep: 1
     },
     {
       id: 'db-chest-press',
@@ -43,7 +55,8 @@ db.on('populate', () => {
       isCustom: false,
       muscleGroup: 'Chest',
       exerciseType: 'compound',
-      restDuration: 120
+      restDuration: 120,
+      weightStep: 2
     }
   ]);
 

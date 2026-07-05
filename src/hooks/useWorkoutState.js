@@ -13,7 +13,8 @@ const DEFAULT_EXERCISES = [
     isCustom: false,
     muscleGroup: 'Shoulders',
     exerciseType: 'compound',
-    restDuration: 120
+    restDuration: 120,
+    weightStep: 2
   },
   {
     id: 'lateral-raises',
@@ -24,7 +25,8 @@ const DEFAULT_EXERCISES = [
     isCustom: false,
     muscleGroup: 'Shoulders',
     exerciseType: 'isolation',
-    restDuration: 90
+    restDuration: 90,
+    weightStep: 1
   },
   {
     id: 'db-chest-press',
@@ -35,9 +37,15 @@ const DEFAULT_EXERCISES = [
     isCustom: false,
     muscleGroup: 'Chest',
     exerciseType: 'compound',
-    restDuration: 120
+    restDuration: 120,
+    weightStep: 2
   }
 ];
+
+// Default whole-kg weight increment for an exercise: compounds jump in 2 kg,
+// isolations in 1 kg. Used when an exercise has no explicit weightStep yet.
+export const defaultWeightStep = (exerciseType) =>
+  exerciseType === 'isolation' ? 1 : 2;
 
 export const useWorkoutState = () => {
   // 1. Reactive Queries from IndexedDB using Dexie
@@ -112,6 +120,9 @@ export const useWorkoutState = () => {
             if (!('restDuration' in copy)) {
               copy.restDuration = copy.exerciseType === 'isolation' ? 90 : 120;
             }
+            if (!('weightStep' in copy)) {
+              copy.weightStep = defaultWeightStep(copy.exerciseType);
+            }
             return copy;
           });
           await db.exercises.bulkAdd(migratedExs);
@@ -146,6 +157,18 @@ export const useWorkoutState = () => {
           if (oldPrefs.prefLoggingMode) {
             await db.preferences.put({ key: 'prefLoggingMode', value: oldPrefs.prefLoggingMode });
           }
+        }
+
+        // Backfill weightStep on any existing exercises that predate the field,
+        // so the whole-kg stepper always has a sensible increment to use.
+        const allExs = await db.exercises.toArray();
+        const needStep = allExs.filter((ex) => typeof ex.weightStep !== 'number');
+        if (needStep.length > 0) {
+          await Promise.all(
+            needStep.map((ex) =>
+              db.exercises.update(ex.id, { weightStep: defaultWeightStep(ex.exerciseType) })
+            )
+          );
         }
 
         // Clear migrated localStorage parameters to prevent re-runs
@@ -244,7 +267,8 @@ export const useWorkoutState = () => {
         targetRange: { min: ex.minReps, max: ex.maxReps },
         muscleGroup: ex.muscleGroup || 'Other',
         exerciseType: ex.exerciseType || 'compound',
-        restDuration: ex.restDuration || 120
+        restDuration: ex.restDuration || 120,
+        weightStep: ex.weightStep || defaultWeightStep(ex.exerciseType)
       };
     });
 
@@ -437,9 +461,10 @@ export const useWorkoutState = () => {
   };
 
   // Add a custom exercise to global config
-  const addExerciseToConfig = async (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120) => {
+  const addExerciseToConfig = async (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120, weightStep) => {
     if (!name.trim()) return;
     const id = `custom-config-${Date.now()}`;
+    const parsedStep = parseInt(weightStep);
     const newEx = {
       id,
       name: name.trim(),
@@ -449,7 +474,8 @@ export const useWorkoutState = () => {
       isCustom: true,
       muscleGroup,
       exerciseType,
-      restDuration: parseInt(restDuration) || 120
+      restDuration: parseInt(restDuration) || 120,
+      weightStep: parsedStep > 0 ? parsedStep : defaultWeightStep(exerciseType)
     };
     await db.exercises.add(newEx);
   };
