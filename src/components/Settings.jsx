@@ -1,17 +1,20 @@
-import { useState, useRef } from 'react';
-import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle } from 'lucide-react';
 import { MUSCLE_GROUPS } from '../utils/workoutHelpers';
+import { getStorageEstimate, formatBytes } from '../utils/storagePersistence';
 
-export default function Settings({ 
-  exercises, 
+export default function Settings({
+  exercises,
   preferences,
   updatePreference,
-  addExerciseToConfig, 
-  updateExerciseInConfig, 
-  deleteExerciseFromConfig, 
-  exportData, 
-  importData, 
-  clearAllData 
+  addExerciseToConfig,
+  updateExerciseInConfig,
+  deleteExerciseFromConfig,
+  exportData,
+  importData,
+  clearAllData,
+  storagePersisted,
+  requestPersistentStorage
 }) {
   const [editingId, setEditingId] = useState(null);
   
@@ -45,6 +48,30 @@ export default function Settings({
 
   // Danger zone confirm
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Storage durability + backup freshness
+  const [nowTs] = useState(() => Date.now()); // stable clock read (avoids impure render)
+  const [estimate, setEstimate] = useState(null);
+  const [enabling, setEnabling] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getStorageEstimate().then((e) => { if (active) setEstimate(e); });
+    return () => { active = false; };
+  }, [storagePersisted]);
+
+  const handleEnablePersistence = async () => {
+    setEnabling(true);
+    await requestPersistentStorage?.();
+    setEnabling(false);
+  };
+
+  const lastBackupAt = preferences?.lastBackupAt || null;
+  const backupAgeDays = lastBackupAt ? Math.floor((nowTs - lastBackupAt) / 86400000) : null;
+  const backupStale = backupAgeDays === null || backupAgeDays >= 7;
+  const backupLabel = lastBackupAt
+    ? backupAgeDays === 0 ? 'Last backup: today' : `Last backup: ${backupAgeDays} day${backupAgeDays === 1 ? '' : 's'} ago`
+    : 'No backup yet';
 
   const startEditing = (ex) => {
     setEditingId(ex.id);
@@ -457,23 +484,72 @@ export default function Settings({
 
       {/* 3. Backup & Export */}
       <div className="card">
-        <h3 className="card-title">Data Backup</h3>
+        <h3 className="card-title">Data & Backup</h3>
         <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
-          All your training logs are stored client-side in this browser's local storage. Export backups to prevent data loss.
+          Your training history is saved on this device in your browser (IndexedDB) — not in the cloud. Keep a backup so you don't lose it if you clear browsing data or switch devices.
         </p>
+
+        {/* Storage durability status */}
+        {storagePersisted !== null && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid',
+            borderColor: storagePersisted ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)',
+            backgroundColor: storagePersisted ? 'var(--success-glow)' : 'var(--warning-glow)'
+          }}>
+            {storagePersisted
+              ? <ShieldCheck size={18} style={{ color: 'var(--success)', flexShrink: 0 }} />
+              : <ShieldAlert size={18} style={{ color: 'var(--warning)', flexShrink: 0 }} />}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span className="text-xs text-bold" style={{ color: storagePersisted ? 'var(--success)' : 'var(--warning)' }}>
+                {storagePersisted ? 'Persistent storage on' : 'Best-effort storage'}
+              </span>
+              <span className="text-xs text-muted">
+                {storagePersisted
+                  ? 'Protected from automatic browser cleanup.'
+                  : 'The browser may clear data if your disk runs low.'}
+              </span>
+            </div>
+            {!storagePersisted && (
+              <button className="btn btn-primary btn-sm" onClick={handleEnablePersistence} disabled={enabling}>
+                {enabling ? '…' : 'Enable'}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Storage usage */}
+        {estimate && estimate.usage > 0 && (
+          <div className="text-xs text-muted" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <HardDrive size={13} /> Using {formatBytes(estimate.usage)}{estimate.quota ? ` of ${formatBytes(estimate.quota)} available` : ''}
+          </div>
+        )}
+
+        {/* Backup freshness nudge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: backupStale ? 'var(--warning)' : 'var(--text-muted)' }}>
+          {backupStale ? <AlertTriangle size={14} style={{ flexShrink: 0 }} /> : <Check size={14} style={{ flexShrink: 0 }} />}
+          <span className={backupStale ? 'text-bold' : ''}>
+            {backupLabel}{backupStale ? ' — export one to stay safe' : ''}
+          </span>
+        </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <button className="btn btn-secondary" onClick={exportData} style={{ justifyContent: 'flex-start' }}>
             <FileDown size={16} /> Export Backup (.json)
           </button>
-          
+
           <button className="btn btn-secondary" onClick={handleImportClick} style={{ justifyContent: 'flex-start' }}>
             <FileUp size={16} /> Import Backup (.json)
           </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            style={{ display: 'none' }} 
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
             accept=".json"
           />
 

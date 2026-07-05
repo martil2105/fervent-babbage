@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/workoutDb';
+import { ensurePersistentStorage } from '../utils/storagePersistence';
 
 // Default exercises backup list (for reset/seeding fallback)
 const DEFAULT_EXERCISES = [
@@ -76,6 +77,10 @@ export const useWorkoutState = () => {
     return saved ? parseInt(saved) : null;
   });
 
+  // Durable-storage status: null = unknown/not yet checked, true = persisted,
+  // false = best-effort (browser may evict under disk pressure).
+  const [storagePersisted, setStoragePersisted] = useState(null);
+
   // Keep transient data saved
   useEffect(() => {
     if (currentWorkout) {
@@ -92,6 +97,24 @@ export const useWorkoutState = () => {
       localStorage.removeItem('hypertrophy_rest_end_time');
     }
   }, [restEndTime]);
+
+  // Ask the browser to keep our IndexedDB data durable (exempt from automatic
+  // eviction). Runs once on load; the result is surfaced in Settings.
+  useEffect(() => {
+    let active = true;
+    ensurePersistentStorage().then((res) => {
+      if (active) setStoragePersisted(res.supported ? res.persisted : null);
+    });
+    return () => { active = false; };
+  }, []);
+
+  // Manual re-request (from the Settings "Enable" button).
+  const requestPersistentStorage = async () => {
+    const res = await ensurePersistentStorage();
+    const status = res.supported ? res.persisted : null;
+    setStoragePersisted(status);
+    return status;
+  };
 
   // 3. Automatic data migration from localStorage to IndexedDB
   useEffect(() => {
@@ -513,6 +536,9 @@ export const useWorkoutState = () => {
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
+
+    // Remember when the last backup was taken so Settings can nudge if stale.
+    db.preferences.put({ key: 'lastBackupAt', value: Date.now() });
   };
 
   // Import data from JSON into IndexedDB
@@ -580,6 +606,8 @@ export const useWorkoutState = () => {
     reorderExercises,
     exportData,
     importData,
-    clearAllData
+    clearAllData,
+    storagePersisted,
+    requestPersistentStorage
   };
 };

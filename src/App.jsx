@@ -52,6 +52,8 @@ export default function App() {
             exportData={workoutState.exportData}
             importData={workoutState.importData}
             clearAllData={workoutState.clearAllData}
+            storagePersisted={workoutState.storagePersisted}
+            requestPersistentStorage={workoutState.requestPersistentStorage}
           />
         );
       default:
