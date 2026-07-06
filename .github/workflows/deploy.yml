@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+
+# Build and publish the app to the `gh-pages` branch (which GitHub Pages serves)
+# on every push to master. This keeps "git push" and "the live site updated" the
+# same action, so the source can never silently drift from what's deployed.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+# Allow the workflow to push the built site to the gh-pages branch.
+permissions:
+  contents: write
+
+# Never run two deploys at once; cancel an in-progress one if a newer push lands.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
