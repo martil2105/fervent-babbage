@@ -11,6 +11,12 @@ import {
   getPersonalBests,
   getDisplayExercises,
   groupSessionsByWeek,
+  getEstimated1RM,
+  getExerciseProgression,
+  getSessionAvgRpe,
+  getLifetimeStats,
+  getWeeklyStreak,
+  getDailyVolumeMap,
 } from './workoutHelpers.js';
 
 // --- small builders to keep the cases readable --------------------------------
@@ -190,5 +196,116 @@ describe('groupSessionsByWeek', () => {
   });
   it('returns an empty array for no sessions', () => {
     expect(groupSessionsByWeek([], [])).toEqual([]);
+  });
+});
+
+// --- Analytics page helpers ----------------------------------------------------
+
+describe('getEstimated1RM', () => {
+  it('applies the Epley formula for multi-rep sets', () => {
+    expect(getEstimated1RM(30, 10)).toBeCloseTo(40); // 30 * (1 + 10/30)
+  });
+  it('returns the weight itself for a single rep', () => {
+    expect(getEstimated1RM(50, 1)).toBe(50);
+  });
+  it('returns 0 for missing or invalid input', () => {
+    expect(getEstimated1RM('', 10)).toBe(0);
+    expect(getEstimated1RM(40, 0)).toBe(0);
+    expect(getEstimated1RM(0, 8)).toBe(0);
+  });
+});
+
+describe('getExerciseProgression', () => {
+  const sessions = [
+    { id: 'b', timestamp: D('2026-06-20'), exercises: [{ exerciseId: 'press', sets: [set(32, 10), set(34, 8)] }] },
+    { id: 'a', timestamp: D('2026-06-10'), exercises: [{ exerciseId: 'press', sets: [warmup(20, 10), set(30, 12)] }] },
+    { id: 'c', timestamp: D('2026-06-25'), exercises: [{ exerciseId: 'other', sets: [set(99, 5)] }] },
+    { id: 'd', timestamp: D('2026-06-28'), exercises: [{ exerciseId: 'press', sets: [set(35, 10, { completed: false })] }] },
+  ];
+  it('returns chronological points from countable sets only', () => {
+    const series = getExerciseProgression('press', sessions);
+    expect(series).toHaveLength(2); // session c has no press, d has no countable sets
+    expect(series[0].timestamp).toBeLessThan(series[1].timestamp);
+    expect(series[0].topWeight).toBe(30); // warmup 20kg ignored
+    expect(series[0].est1RM).toBeCloseTo(42); // 30 * (1 + 12/30)
+    expect(series[1].topWeight).toBe(34);
+    expect(series[1].volume).toBe(32 * 10 + 34 * 8);
+  });
+  it('handles unknown exercises and empty input', () => {
+    expect(getExerciseProgression('nope', sessions)).toEqual([]);
+    expect(getExerciseProgression('press', [])).toEqual([]);
+  });
+});
+
+describe('getSessionAvgRpe', () => {
+  it('averages RPE across countable sets, converting RIR', () => {
+    const session = {
+      exercises: [
+        { exerciseId: 'a', sets: [set(30, 10, { rpe: 8 }), set(30, 10, { rir: 1 })] }, // rir 1 -> rpe 9
+        { exerciseId: 'b', sets: [warmup(20, 10), set(40, 8, { rpe: 7 })] },
+      ],
+    };
+    expect(getSessionAvgRpe(session)).toBe(8); // (8 + 9 + 7) / 3
+  });
+  it('returns null when no effort data exists', () => {
+    expect(getSessionAvgRpe({ exercises: [{ exerciseId: 'a', sets: [set(30, 10)] }] })).toBeNull();
+    expect(getSessionAvgRpe(null)).toBeNull();
+  });
+});
+
+describe('getLifetimeStats', () => {
+  const sessions = [
+    { id: 'a', timestamp: D('2026-06-10'), duration: 40, exercises: [{ exerciseId: 'x', sets: [set(30, 10), warmup(20, 10)] }] },
+    { id: 'b', timestamp: D('2026-06-12'), duration: 50, exercises: [{ exerciseId: 'x', sets: [set(30, 10), set(30, 8, { completed: false })] }] },
+    { id: 'c', timestamp: D('2026-06-14'), exercises: [{ exerciseId: 'x', sets: [set(40, 5)] }] },
+  ];
+  it('totals sessions, countable sets, reps and volume', () => {
+    const stats = getLifetimeStats(sessions);
+    expect(stats.sessionsCount).toBe(3);
+    expect(stats.totalSets).toBe(3); // warmup + skipped set excluded
+    expect(stats.totalReps).toBe(25); // 10 + 10 + 5
+    expect(stats.totalVolume).toBe(300 + 300 + 200);
+    expect(stats.avgDuration).toBe(45); // only sessions with a duration
+  });
+  it('returns zeroed stats for empty input', () => {
+    expect(getLifetimeStats([])).toEqual({ sessionsCount: 0, totalVolume: 0, totalSets: 0, totalReps: 0, avgDuration: 0 });
+  });
+});
+
+describe('getWeeklyStreak', () => {
+  // 2026-07-10 is a Friday; that week's Monday is 2026-07-06
+  const now = new Date('2026-07-10T12:00:00');
+  const s = (dateStr) => ({ id: dateStr, timestamp: D(dateStr), exercises: [] });
+  it('counts consecutive trained weeks including the current one', () => {
+    const streak = getWeeklyStreak([s('2026-07-07'), s('2026-06-30'), s('2026-06-24')], now);
+    expect(streak).toBe(3);
+  });
+  it('does not break the streak on a quiet current week', () => {
+    const streak = getWeeklyStreak([s('2026-06-30'), s('2026-06-24')], now);
+    expect(streak).toBe(2);
+  });
+  it('resets when a full week was missed', () => {
+    const streak = getWeeklyStreak([s('2026-07-07'), s('2026-06-16')], now);
+    expect(streak).toBe(1);
+  });
+  it('returns 0 with no sessions', () => {
+    expect(getWeeklyStreak([], now)).toBe(0);
+  });
+});
+
+describe('getDailyVolumeMap', () => {
+  it('sums session volume per calendar day', () => {
+    const t1 = new Date('2026-07-06T08:00:00').getTime();
+    const t2 = new Date('2026-07-06T18:00:00').getTime();
+    const map = getDailyVolumeMap([
+      { id: 'am', timestamp: t1, exercises: [{ exerciseId: 'x', sets: [set(30, 10)] }] },
+      { id: 'pm', timestamp: t2, exercises: [{ exerciseId: 'x', sets: [set(20, 10)] }] },
+    ]);
+    const dayKey = new Date('2026-07-06T00:00:00').setHours(0, 0, 0, 0);
+    expect(Object.keys(map)).toHaveLength(1);
+    expect(map[dayKey]).toBe(500);
+  });
+  it('returns an empty map for no sessions', () => {
+    expect(getDailyVolumeMap([])).toEqual({});
   });
 });

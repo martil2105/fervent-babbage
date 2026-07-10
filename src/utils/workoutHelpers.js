@@ -364,6 +364,154 @@ export const getDisplayExercises = (configExercises = [], sessions = []) => {
 };
 
 /**
+ * Estimated one-rep max using the Epley formula: w × (1 + reps/30).
+ * A single rep returns the weight itself. Returns 0 for missing/invalid input.
+ * Estimates get fuzzy at high reps, but stay useful as a trend signal.
+ */
+export const getEstimated1RM = (weight, reps) => {
+  const w = parseFloat(weight) || 0;
+  const r = parseInt(reps) || 0;
+  if (w <= 0 || r <= 0) return 0;
+  if (r === 1) return w;
+  return w * (1 + r / 30);
+};
+
+/**
+ * Build a chronological per-session strength series for one exercise.
+ * Each point: { timestamp, topWeight, est1RM, volume } computed from
+ * countable (completed, non-warmup) sets only. Sessions where the exercise
+ * has no countable sets are skipped. Used by the Analytics progression chart.
+ */
+export const getExerciseProgression = (exerciseId, sessions) => {
+  if (!sessions || !Array.isArray(sessions)) return [];
+  const points = [];
+
+  sessions.forEach((session) => {
+    const ex = session.exercises?.find((e) => e.exerciseId === exerciseId);
+    if (!ex || !ex.sets) return;
+    const working = ex.sets.filter(isCountableSet);
+    if (working.length === 0) return;
+
+    let topWeight = 0;
+    let est1RM = 0;
+    working.forEach((s) => {
+      const w = parseFloat(s.weight) || 0;
+      if (w > topWeight) topWeight = w;
+      const e = getEstimated1RM(s.weight, s.reps);
+      if (e > est1RM) est1RM = e;
+    });
+
+    points.push({
+      timestamp: session.timestamp,
+      topWeight,
+      est1RM: Math.round(est1RM * 10) / 10,
+      volume: getExerciseVolume(ex.sets)
+    });
+  });
+
+  return points.sort((a, b) => a.timestamp - b.timestamp);
+};
+
+/**
+ * Average RPE across a session's countable sets (RIR entries are converted).
+ * Returns null when no set carries effort data, so callers can skip the point.
+ */
+export const getSessionAvgRpe = (session) => {
+  if (!session || !session.exercises) return null;
+  let sum = 0;
+  let count = 0;
+  session.exercises.forEach((ex) => {
+    (ex.sets || []).forEach((set) => {
+      if (!isCountableSet(set)) return;
+      const rpe = getSetRpe(set);
+      if (rpe !== null && !Number.isNaN(rpe)) {
+        sum += rpe;
+        count += 1;
+      }
+    });
+  });
+  if (count === 0) return null;
+  return Math.round((sum / count) * 10) / 10;
+};
+
+/**
+ * Lifetime training totals across all sessions:
+ * { sessionsCount, totalVolume, totalSets, totalReps, avgDuration }.
+ * Sets/reps/volume count countable sets only; avgDuration averages the
+ * sessions that recorded a duration (0 when none did).
+ */
+export const getLifetimeStats = (sessions) => {
+  const stats = { sessionsCount: 0, totalVolume: 0, totalSets: 0, totalReps: 0, avgDuration: 0 };
+  if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return stats;
+
+  let durationSum = 0;
+  let durationCount = 0;
+
+  sessions.forEach((session) => {
+    stats.sessionsCount += 1;
+    if (session.duration) {
+      durationSum += session.duration;
+      durationCount += 1;
+    }
+    (session.exercises || []).forEach((ex) => {
+      (ex.sets || []).forEach((set) => {
+        if (!isCountableSet(set)) return;
+        stats.totalSets += 1;
+        stats.totalReps += parseInt(set.reps) || 0;
+        stats.totalVolume += getSetVolume(set.weight, set.reps, false);
+      });
+    });
+  });
+
+  stats.avgDuration = durationCount > 0 ? Math.round(durationSum / durationCount) : 0;
+  return stats;
+};
+
+/**
+ * Count consecutive calendar weeks with at least one session, walking
+ * backwards from the week containing `now`. A quiet current week doesn't
+ * break the streak (the week isn't over yet) — it just isn't counted.
+ */
+export const getWeeklyStreak = (sessions, now = new Date()) => {
+  if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return 0;
+
+  const trainedWeeks = new Set(
+    sessions.map((s) => getMondayOfDate(s.timestamp).getTime())
+  );
+
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  let cursor = getMondayOfDate(now).getTime();
+  let streak = 0;
+
+  // Current week counts if trained; otherwise start checking from last week.
+  if (trainedWeeks.has(cursor)) {
+    streak += 1;
+  }
+  cursor -= WEEK_MS;
+
+  while (trainedWeeks.has(cursor)) {
+    streak += 1;
+    cursor -= WEEK_MS;
+  }
+
+  return streak;
+};
+
+/**
+ * Map of day-start timestamp -> total session volume for that day.
+ * Powers the consistency heatmap on the Analytics page.
+ */
+export const getDailyVolumeMap = (sessions) => {
+  const map = {};
+  if (!sessions || !Array.isArray(sessions)) return map;
+  sessions.forEach((session) => {
+    const day = getStartOfDay(session.timestamp).getTime();
+    map[day] = (map[day] || 0) + getSessionVolume(session.exercises);
+  });
+  return map;
+};
+
+/**
  * Get personal bests for each exercise.
  * Returns: {
  *   [exerciseId]: {

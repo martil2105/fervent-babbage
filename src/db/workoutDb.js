@@ -19,6 +19,15 @@ db.version(2).stores({
   gameState: 'key' // key-value table for game progression (xp, streak, ...)
 });
 
+// v3 — PUSH Quest removed (replaced by the Analytics page). Drop the unused
+// gameState store; workout history, exercises and preferences are untouched.
+db.version(3).stores({
+  exercises: 'id, name, muscleGroup, exerciseType',
+  history: 'id, timestamp',
+  preferences: 'key',
+  gameState: null
+});
+
 // Seed default exercises when database is created for the first time
 db.on('populate', () => {
   db.exercises.bulkAdd([
