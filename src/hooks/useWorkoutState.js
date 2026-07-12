@@ -349,6 +349,40 @@ export const useWorkoutState = () => {
     return completedSession;
   };
 
+  // Edit a completed session in history (sets, exercises, date, duration).
+  // Sets are sanitized the same way completeWorkout does it, so downstream
+  // consumers (volume, PBs, analytics) can keep assuming clean numbers.
+  const updateHistorySession = async (sessionId, updates) => {
+    const changes = {};
+
+    if (updates.exercises) {
+      changes.exercises = updates.exercises
+        .map((ex) => ({
+          ...ex,
+          sets: ex.sets.map((set) => ({
+            weight: parseFloat(set.weight) || 0,
+            reps: parseInt(set.reps) || 0,
+            isWarmup: !!set.isWarmup,
+            completed: !!set.completed,
+            rpe: set.rpe === '' || set.rpe === undefined ? null : set.rpe,
+            rir: set.rir === '' || set.rir === undefined ? null : set.rir
+          }))
+        }))
+        .filter((ex) => ex.sets.length > 0);
+    }
+
+    if (updates.timestamp !== undefined) {
+      const ts = new Date(updates.timestamp).getTime();
+      if (!Number.isNaN(ts)) changes.timestamp = ts;
+    }
+
+    if (updates.duration !== undefined) {
+      changes.duration = Math.max(0, parseInt(updates.duration) || 0);
+    }
+
+    await db.history.update(sessionId, changes);
+  };
+
   // Edit active workout sets
   const updateSet = (exerciseId, setIndex, field, value) => {
     if (!currentWorkout) return;
@@ -596,6 +630,7 @@ export const useWorkoutState = () => {
     startWorkout,
     cancelWorkout,
     completeWorkout,
+    updateHistorySession,
     updateSet,
     addSetToActive,
     removeSetFromActive,

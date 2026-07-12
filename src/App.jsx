@@ -39,7 +39,13 @@ export default function App() {
       case 'analytics':
         return <Analytics history={workoutState.history} exercises={workoutState.exercises} />;
       case 'history':
-        return <History history={workoutState.history} exercises={workoutState.exercises} />;
+        return (
+          <History
+            history={workoutState.history}
+            exercises={workoutState.exercises}
+            updateHistorySession={workoutState.updateHistorySession}
+          />
+        );
       case 'settings':
         return (
           <Settings 
