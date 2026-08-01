@@ -17,6 +17,16 @@ import {
   getLifetimeStats,
   getWeeklyStreak,
   getDailyVolumeMap,
+  getRoutineLastTrained,
+  getDaysSinceRoutine,
+  getAllTimeBest,
+  isBestStale,
+  STALE_BEST_DAYS,
+  getReferenceExerciseData,
+  roundWeight,
+  formatWeight,
+  MUSCLE_GROUPS,
+  SELECTABLE_MUSCLE_GROUPS,
 } from './workoutHelpers.js';
 
 // --- small builders to keep the cases readable --------------------------------
@@ -307,5 +317,226 @@ describe('getDailyVolumeMap', () => {
   });
   it('returns an empty map for no sessions', () => {
     expect(getDailyVolumeMap([])).toEqual({});
+  });
+});
+
+describe('muscle group lists', () => {
+  it('splits legs into four trainable groups', () => {
+    expect(SELECTABLE_MUSCLE_GROUPS).toContain('Quads');
+    expect(SELECTABLE_MUSCLE_GROUPS).toContain('Hamstrings');
+    expect(SELECTABLE_MUSCLE_GROUPS).toContain('Glutes');
+    expect(SELECTABLE_MUSCLE_GROUPS).toContain('Calves');
+  });
+  it('does not offer the retired "Legs" value when tagging', () => {
+    expect(SELECTABLE_MUSCLE_GROUPS).not.toContain('Legs');
+  });
+  it('still aggregates "Legs" so pre-split data stays visible', () => {
+    expect(MUSCLE_GROUPS).toContain('Legs');
+  });
+});
+
+describe('getRoutineLastTrained', () => {
+  const sessions = [
+    { id: 'a', timestamp: 300, routineId: 'routine-legs' },
+    { id: 'b', timestamp: 500, routineId: 'routine-push' },
+    { id: 'c', timestamp: 100, routineId: 'routine-legs' },
+  ];
+
+  it('returns the most recent timestamp for the routine', () => {
+    expect(getRoutineLastTrained(sessions, 'routine-legs')).toBe(300);
+  });
+  it('ignores sessions belonging to other routines', () => {
+    expect(getRoutineLastTrained(sessions, 'routine-push')).toBe(500);
+  });
+  it('returns null for a routine never trained', () => {
+    expect(getRoutineLastTrained(sessions, 'routine-pull')).toBeNull();
+  });
+  it('ignores pre-routine sessions that carry no routineId', () => {
+    expect(getRoutineLastTrained([{ id: 'old', timestamp: 900 }], 'routine-legs')).toBeNull();
+  });
+  it('handles empty and missing input', () => {
+    expect(getRoutineLastTrained([], 'routine-legs')).toBeNull();
+    expect(getRoutineLastTrained(null, 'routine-legs')).toBeNull();
+    expect(getRoutineLastTrained(sessions, undefined)).toBeNull();
+  });
+});
+
+describe('getAllTimeBest', () => {
+  const DAY = 86400000;
+  const t = (daysAgo) => new Date('2026-08-01T12:00:00').getTime() - daysAgo * DAY;
+  const sess = (timestamp, sets) => ({
+    id: `s${timestamp}`,
+    timestamp,
+    exercises: [{ exerciseId: 'leg-press', sets }],
+  });
+
+  it('anchors on the heaviest weight ever, not the most recent', () => {
+    const history = [
+      sess(t(2), [set(50, 10), set(50, 9)]),   // most recent, but lighter
+      sess(t(9), [set(60, 8), set(60, 7)]),    // all-time best
+    ];
+    expect(getAllTimeBest('leg-press', history).weight).toBe(60);
+  });
+
+  it('returns the reps in set order so fatigue drop-off is preserved', () => {
+    const history = [sess(t(3), [set(60, 10), set(60, 8), set(60, 6)])];
+    expect(getAllTimeBest('leg-press', history).reps).toEqual([10, 8, 6]);
+  });
+
+  it('reports best reps ever at the top weight, across sessions', () => {
+    const history = [
+      sess(t(2), [set(60, 9)]),
+      sess(t(20), [set(60, 13)]), // older but better at the same weight
+    ];
+    const best = getAllTimeBest('leg-press', history);
+    expect(best.bestReps).toBe(13);
+    expect(best.topSetReps).toBe(9);      // from the most recent session at 60
+    expect(best.timestamp).toBe(t(2));
+  });
+
+  it('ignores warmups and unchecked sets', () => {
+    const history = [
+      sess(t(1), [
+        warmup(100, 5),
+        set(80, 8, { completed: false }),
+        set(50, 10),
+      ]),
+    ];
+    expect(getAllTimeBest('leg-press', history).weight).toBe(50);
+  });
+
+  it('ignores other exercises', () => {
+    const history = [{
+      id: 'x', timestamp: t(1),
+      exercises: [{ exerciseId: 'leg-curl', sets: [set(90, 10)] }],
+    }];
+    expect(getAllTimeBest('leg-press', history)).toBeNull();
+  });
+
+  it('returns null for bodyweight-only or unlogged exercises', () => {
+    expect(getAllTimeBest('leg-press', [sess(t(1), [set(0, 12)])])).toBeNull();
+    expect(getAllTimeBest('leg-press', [])).toBeNull();
+    expect(getAllTimeBest('leg-press', null)).toBeNull();
+    expect(getAllTimeBest(undefined, [sess(t(1), [set(50, 10)])])).toBeNull();
+  });
+});
+
+describe('roundWeight', () => {
+  it('snaps to the nearest half kilo', () => {
+    expect(roundWeight(12.4)).toBe(12.5);
+    expect(roundWeight(12.24)).toBe(12);
+    expect(roundWeight(2.5)).toBe(2.5);
+    expect(roundWeight(1.25)).toBe(1.5);
+  });
+  it('returns 0 for junk, negatives and blanks', () => {
+    expect(roundWeight('')).toBe(0);
+    expect(roundWeight('abc')).toBe(0);
+    expect(roundWeight(-5)).toBe(0);
+    expect(roundWeight(null)).toBe(0);
+    expect(roundWeight(undefined)).toBe(0);
+  });
+  it('parses numeric strings from inputs', () => {
+    expect(roundWeight('47.5')).toBe(47.5);
+  });
+});
+
+describe('formatWeight', () => {
+  it('drops the decimal on whole numbers', () => {
+    expect(formatWeight(12)).toBe('12');
+    expect(formatWeight(12.0)).toBe('12');
+  });
+  it('shows a single decimal on halves', () => {
+    expect(formatWeight(12.5)).toBe('12.5');
+  });
+  it('survives junk input', () => {
+    expect(formatWeight('abc')).toBe('0');
+  });
+});
+
+describe('getReferenceExerciseData', () => {
+  const DAY = 86400000;
+  const now = new Date('2026-08-01T12:00:00').getTime();
+  const sess = (timestamp, sets) => ({
+    id: `s${timestamp}`,
+    timestamp,
+    exercises: [{ exerciseId: 'leg-press', targetRange: { min: 10, max: 15 }, sets }],
+  });
+
+  it('prefers the best session over the most recent one', () => {
+    const history = [
+      sess(now - 2 * DAY, [set(50, 10)]),
+      sess(now - 9 * DAY, [set(60, 8)]),
+    ];
+    const ref = getReferenceExerciseData('leg-press', history, now);
+    expect(ref.sets[0].weight).toBe(60);
+  });
+
+  it('falls back to the latest session when the best is stale', () => {
+    const history = [
+      sess(now - 2 * DAY, [set(50, 10)]),
+      sess(now - (STALE_BEST_DAYS + 5) * DAY, [set(60, 8)]),
+    ];
+    const ref = getReferenceExerciseData('leg-press', history, now);
+    expect(ref.sets[0].weight).toBe(50);
+  });
+
+  it('skips the staleness check when no clock is supplied', () => {
+    const history = [
+      sess(now - 2 * DAY, [set(50, 10)]),
+      sess(now - 400 * DAY, [set(60, 8)]),
+    ];
+    expect(getReferenceExerciseData('leg-press', history).sets[0].weight).toBe(60);
+  });
+
+  it('returns null for an exercise with no history', () => {
+    expect(getReferenceExerciseData('leg-press', [], now)).toBeNull();
+    expect(getReferenceExerciseData('leg-press', null, now)).toBeNull();
+  });
+
+  it('keeps the hint and the prefill reading the same session', () => {
+    // Regression guard: these two used to disagree after an off day.
+    const history = [
+      sess(now - 1 * DAY, [set(50, 12)]),
+      sess(now - 6 * DAY, [set(60, 15), set(60, 15)]),
+    ];
+    const best = getAllTimeBest('leg-press', history);
+    const ref = getReferenceExerciseData('leg-press', history, now);
+    expect(ref.sets.every((s) => s.weight === best.weight)).toBe(true);
+  });
+});
+
+describe('isBestStale', () => {
+  const DAY = 86400000;
+  const now = new Date('2026-08-01T12:00:00').getTime();
+
+  it('accepts a best from within the window', () => {
+    expect(isBestStale({ timestamp: now - 5 * DAY }, now)).toBe(false);
+  });
+  it('rejects a best older than the window, so a layoff cannot strand you', () => {
+    expect(isBestStale({ timestamp: now - (STALE_BEST_DAYS + 1) * DAY }, now)).toBe(true);
+  });
+  it('treats a missing best as stale', () => {
+    expect(isBestStale(null, now)).toBe(true);
+  });
+});
+
+describe('getDaysSinceRoutine', () => {
+  const DAY = 86400000;
+  const now = new Date('2026-08-01T12:00:00').getTime();
+
+  it('counts whole days since the last session', () => {
+    const sessions = [{ id: 'a', timestamp: now - 3 * DAY, routineId: 'routine-legs' }];
+    expect(getDaysSinceRoutine(sessions, 'routine-legs', now)).toBe(3);
+  });
+  it('returns 0 when trained earlier the same day', () => {
+    const sessions = [{ id: 'a', timestamp: now - 3600000, routineId: 'routine-legs' }];
+    expect(getDaysSinceRoutine(sessions, 'routine-legs', now)).toBe(0);
+  });
+  it('never returns a negative count for a future timestamp', () => {
+    const sessions = [{ id: 'a', timestamp: now + 2 * DAY, routineId: 'routine-legs' }];
+    expect(getDaysSinceRoutine(sessions, 'routine-legs', now)).toBe(0);
+  });
+  it('returns null when the routine has never been trained', () => {
+    expect(getDaysSinceRoutine([], 'routine-legs', now)).toBeNull();
   });
 });

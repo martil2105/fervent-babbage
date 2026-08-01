@@ -11,9 +11,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'icons.svg'],
       manifest: {
-        name: 'Push Hypertrophy Tracker',
-        short_name: 'PushTrack',
-        description: 'Track your push hypertrophy workouts offline.',
+        name: 'Hypertrophy Log',
+        short_name: 'HypLog',
+        description: 'Track your hypertrophy training sessions offline.',
         theme_color: '#0f1015',
         background_color: '#0f1015',
         display: 'standalone',

@@ -1,17 +1,27 @@
-import { useState, useEffect } from 'react';
-import { Play, Check, Trash2, Plus, X, Dumbbell, Clock, Ghost, TrendingUp } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { notifyRestComplete } from '../utils/restNotification';
+import { Play, Check, Trash2, Plus, X, Dumbbell, Clock, Ghost, TrendingUp, Trophy } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { getProgressionSuggestion, getLastSessionSets, formatDate } from '../utils/workoutHelpers';
+import {
+  getProgressionSuggestion,
+  getLastSessionSets,
+  formatDate,
+  getDaysSinceRoutine,
+  getAllTimeBest,
+  roundWeight,
+  formatWeight
+} from '../utils/workoutHelpers';
 
-export default function WorkoutActive({ 
-  currentWorkout, 
-  startWorkout, 
-  cancelWorkout, 
-  completeWorkout, 
-  updateSet, 
-  addSetToActive, 
+export default function WorkoutActive({
+  currentWorkout,
+  startWorkout,
+  cancelWorkout,
+  completeWorkout,
+  updateSet,
+  addSetToActive,
   removeSetFromActive,
   addCustomExerciseToActive,
+  routines = [],
   history,
   preferences,
   restEndTime,
@@ -47,12 +57,37 @@ export default function WorkoutActive({
     return () => clearInterval(interval);
   }, [currentWorkout]);
 
+  // Mirrored in a ref so the rest-timer effect can name the exercise without
+  // taking currentWorkout as a dependency — that would restart the effect on
+  // every keystroke and re-arm the already-fired alert.
+  const workoutRef = useRef(currentWorkout);
+  useEffect(() => {
+    workoutRef.current = currentWorkout;
+  }, [currentWorkout]);
+
   // Rest timer countdown and vibration/auto-clear
   useEffect(() => {
     if (!restEndTime) return;
 
     let vibrated = false;
     let autoClearId = null;
+
+    // The exercise you were resting from: whichever holds the most recently
+    // completed set.
+    const restingFrom = () => {
+      const exercises = workoutRef.current?.exercises || [];
+      let name = null;
+      let latest = -Infinity;
+      exercises.forEach((ex) => {
+        (ex.sets || []).forEach((s) => {
+          if (s.completedAt && s.completedAt > latest) {
+            latest = s.completedAt;
+            name = ex.name;
+          }
+        });
+      });
+      return name;
+    };
 
     const checkTimer = () => {
       setNow(Date.now());
@@ -62,6 +97,8 @@ export default function WorkoutActive({
         if (navigator.vibrate) {
           navigator.vibrate([300, 100, 300]);
         }
+        // No-ops unless permission was granted and the app is backgrounded.
+        notifyRestComplete({ exerciseName: restingFrom() });
         // Auto clear after 6 seconds of flashing (scheduled once)
         autoClearId = setTimeout(() => {
           clearRestTimer();
@@ -91,8 +128,8 @@ export default function WorkoutActive({
 
   if (!currentWorkout) {
     return (
-      <div className="tab-content" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-        <div className="empty-state">
+      <div className="tab-content" style={{ justifyContent: 'center', minHeight: '60vh' }}>
+        <div className="empty-state" style={{ width: '100%' }}>
           <div style={{
             background: 'var(--accent-glow)',
             color: 'var(--accent-strong)',
@@ -107,23 +144,67 @@ export default function WorkoutActive({
           </div>
           <h2>Start Training</h2>
           <p className="text-muted text-center" style={{ maxWidth: '300px' }}>
-            Ready for your Push Hypertrophy session? Start a workout to track weights, reps, and volume in real-time.
+            Pick today&apos;s session. Weights, reps and volume are tracked in real time.
           </p>
-          <button className="btn btn-primary" onClick={startWorkout} style={{ width: '100%', maxWidth: '240px', marginTop: '10px' }}>
-            <Play size={18} fill="currentColor" /> Start Workout Session
-          </button>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '340px', marginTop: '10px' }}>
+            {routines.map((routine) => {
+              const daysSince = getDaysSinceRoutine(history, routine.id, now);
+              const count = routine.exerciseIds?.length || 0;
+
+              const lastLabel =
+                daysSince === null ? 'Not trained yet'
+                  : daysSince === 0 ? 'Trained today'
+                  : daysSince === 1 ? 'Trained yesterday'
+                  : `${daysSince} days ago`;
+
+              return (
+                <button
+                  key={routine.id}
+                  className="btn"
+                  onClick={() => startWorkout(routine.id)}
+                  disabled={count === 0}
+                  style={{
+                    width: '100%',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '14px 16px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--feather-200)',
+                    borderRadius: '12px',
+                    opacity: count === 0 ? 0.55 : 1,
+                    cursor: count === 0 ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
+                    <span style={{ fontSize: '15px', fontWeight: 600 }}>{routine.name}</span>
+                    <span className="text-xs text-muted">
+                      {count === 0 ? 'No exercises yet' : `${count} exercise${count === 1 ? '' : 's'} · ${lastLabel}`}
+                    </span>
+                  </div>
+                  <Play size={18} fill="currentColor" style={{ color: 'var(--accent-strong)', flexShrink: 0 }} />
+                </button>
+              );
+            })}
+          </div>
+
+          {routines.length === 0 && (
+            <button className="btn btn-primary" onClick={() => startWorkout()} style={{ width: '100%', maxWidth: '240px', marginTop: '10px' }}>
+              <Play size={18} fill="currentColor" /> Start Workout Session
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
-  // Weight adjust helpers — whole kilograms only. The +/- buttons jump by the
-  // exercise's own weightStep, and any typed value is snapped to a whole number
-  // so options like "2 kg" never appear when you're working at 26 kg.
+  // Weight adjust helpers — half-kilogram granularity. The +/- buttons jump by
+  // the exercise's own weightStep and typed values snap to the nearest 0.5, so
+  // 2.5 kg dumbbells and 1.25 kg microplates are expressible while arbitrary
+  // decimals (and their float noise) are not.
   const handleWeightChange = (exId, setIdx, currentVal, delta) => {
-    const base = Math.round(parseFloat(currentVal) || 0);
-    const newVal = Math.max(0, base + delta);
-    updateSet(exId, setIdx, 'weight', newVal);
+    const base = roundWeight(currentVal);
+    updateSet(exId, setIdx, 'weight', Math.max(0, roundWeight(base + delta)));
   };
 
   const handleWeightInput = (exId, setIdx, raw) => {
@@ -131,8 +212,7 @@ export default function WorkoutActive({
       updateSet(exId, setIdx, 'weight', '');
       return;
     }
-    const rounded = Math.round(parseFloat(raw));
-    updateSet(exId, setIdx, 'weight', Number.isNaN(rounded) ? 0 : Math.max(0, rounded));
+    updateSet(exId, setIdx, 'weight', roundWeight(raw));
   };
 
   // Fallback increment for active sessions started before weightStep existed.
@@ -187,13 +267,24 @@ export default function WorkoutActive({
       {/* 2. Exercises Logging List */}
       {currentWorkout.exercises.map((ex) => {
         const mockDef = { maxReps: ex.targetRange.max };
-        const suggestion = getProgressionSuggestion(ex.exerciseId, history, mockDef);
+        // `now` keeps the hint reading the same session the prefill anchored to,
+        // including the staleness fallback after a layoff.
+        const suggestion = getProgressionSuggestion(ex.exerciseId, history, mockDef, now);
         const weightStep = stepFor(ex);
         const last = getLastSessionSets(ex.exerciseId, history);
         // Per-set target: beat last time's reps by one, or if you already hit the
         // top of the rep range last time, the goal becomes adding weight.
         const repTarget = (prevReps) =>
           prevReps >= ex.targetRange.max ? null : prevReps + 1;
+
+        // All-time best is what the prefill anchors to, so show it — and say so
+        // when the last session came in under it, which is the one case where
+        // the prefilled weight won't match what you last actually lifted.
+        const best = getAllTimeBest(ex.exerciseId, history);
+        const lastTopWeight = last && last.sets.length > 0
+          ? Math.max(...last.sets.map((s) => s.weight))
+          : 0;
+        const belowBest = best !== null && lastTopWeight < best.weight;
 
         return (
           <div key={ex.exerciseId} className="card exercise-log-card" style={{
@@ -245,6 +336,20 @@ export default function WorkoutActive({
                     <TrendingUp size={12} /> Beat it
                   </span>
                 </div>
+
+                {best && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                    <Trophy size={12} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} />
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                      Best · {formatWeight(best.weight)} kg × {best.bestReps}
+                    </span>
+                    {belowBest && (
+                      <span className="text-xs text-bold" style={{ color: 'var(--warning-strong)' }}>
+                        · last session was under this
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {last.sets.map((s, i) => {
                     const aim = repTarget(s.reps);
@@ -258,10 +363,10 @@ export default function WorkoutActive({
                         padding: '3px 7px',
                         color: 'var(--text-secondary)'
                       }}>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{s.weight}</span>×{s.reps}
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{formatWeight(s.weight)}</span>×{s.reps}
                         {aim
                           ? <span style={{ color: 'var(--success-strong)' }}> → aim {aim}</span>
-                          : <span style={{ color: 'var(--warning-strong)' }}> → +{weightStep}kg</span>}
+                          : <span style={{ color: 'var(--warning-strong)' }}> → +{formatWeight(weightStep)}kg</span>}
                       </span>
                     );
                   })}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { TrendingUp, TrendingDown, Minus, Info, BarChart2, Zap } from 'lucide-react';
-import { 
+import { TrendingUp, TrendingDown, Minus, Info, BarChart2, Zap, ShieldAlert, X } from 'lucide-react';
+import {
   groupSessionsByWeek,
   calculateTrend,
   getProgressionSuggestion,
@@ -9,9 +9,58 @@ import {
   getDisplayExercises,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
+import { isBackupDue, daysSinceBackup } from '../utils/autoBackup';
 
-export default function Dashboard({ history, exercises }) {
+export default function Dashboard({ history, exercises, lastBackupAt, exportData, hasBackupFolder }) {
   const [breakdownView, setBreakdownView] = useState('muscleGroups'); // 'muscleGroups' | 'exercises'
+  const [backupDismissed, setBackupDismissed] = useState(false);
+
+  // Stable clock read — react-compiler rejects Date.now() during render.
+  const [nowTs] = useState(() => Date.now());
+
+  // The warning used to live in Settings, which is precisely where someone who
+  // has never thought about backups will never look. An unbacked-up log is the
+  // only unrecoverable state in the app, so it earns space on the main screen.
+  const backupOverdue =
+    !hasBackupFolder && !backupDismissed && isBackupDue(lastBackupAt, nowTs, 7);
+  const backupAgeDays = daysSinceBackup(lastBackupAt, nowTs);
+
+  const backupBanner = backupOverdue ? (
+    <div style={{
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: '10px',
+      padding: '12px 14px',
+      marginBottom: '14px',
+      backgroundColor: 'var(--warning-glow)',
+      border: '1px solid var(--warning)',
+      borderRadius: 'var(--radius-sm)'
+    }}>
+      <ShieldAlert size={18} style={{ color: 'var(--warning-strong)', flexShrink: 0, marginTop: '1px' }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="text-bold" style={{ fontSize: '13px', color: 'var(--warning-strong)' }}>
+          {backupAgeDays === null ? 'Your log has never been backed up' : `No backup in ${backupAgeDays} days`}
+        </div>
+        <div className="text-xs text-muted" style={{ marginTop: '2px' }}>
+          Everything is stored only in this browser. Clearing site data would erase it.
+        </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={exportData}
+          style={{ marginTop: '8px' }}
+        >
+          Back up now
+        </button>
+      </div>
+      <button
+        onClick={() => setBackupDismissed(true)}
+        aria-label="Dismiss backup warning"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', flexShrink: 0 }}
+      >
+        <X size={14} style={{ color: 'var(--text-muted)' }} />
+      </button>
+    </div>
+  ) : null;
 
   if (!history || history.length === 0) {
     return (
@@ -99,6 +148,7 @@ export default function Dashboard({ history, exercises }) {
 
   return (
     <div className="tab-content">
+      {backupBanner}
       {/* 1. Metric summary cards */}
       <div className="analytics-summary-grid">
         <div className="metric-card">

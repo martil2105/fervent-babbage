@@ -5,7 +5,8 @@ import {
   getSessionVolume,
   getExerciseVolume,
   getPersonalBests,
-  getDisplayExercises
+  getDisplayExercises,
+  SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
 
 // Convert a timestamp to the local "YYYY-MM-DDTHH:mm" string that
@@ -15,8 +16,6 @@ const toLocalInputValue = (ts) => {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-
-const MUSCLE_GROUPS = ['Chest', 'Shoulders', 'Triceps', 'Lats', 'Back', 'Legs', 'Abs', 'Other'];
 
 // Fresh set for exercises/sets added during a history edit. Added sets count
 // as logged (completed: true) since the edit is describing what really happened.
@@ -222,7 +221,24 @@ export default function History({ history, exercises, updateHistorySession }) {
               >
                 <div className="history-item-header">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span className="history-item-date">{formatDate(session.timestamp)}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="history-item-date">{formatDate(session.timestamp)}</span>
+                      {/* Sessions logged before routines existed have no name */}
+                      {session.routineName && (
+                        <span className="text-xs" style={{
+                          backgroundColor: 'var(--accent-glow)',
+                          color: 'var(--accent-strong)',
+                          padding: '1px 7px',
+                          borderRadius: '8px',
+                          fontSize: '9px',
+                          fontWeight: 700,
+                          letterSpacing: '0.03em',
+                          textTransform: 'uppercase'
+                        }}>
+                          {session.routineName}
+                        </span>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)', fontSize: '12px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                         <Clock size={12} /> {session.duration || 0}m

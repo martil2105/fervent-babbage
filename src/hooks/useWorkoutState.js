@@ -1,7 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/workoutDb';
+import { db, LEG_EXERCISES, PUSH_ROUTINE_ID, LEGS_ROUTINE_ID } from '../db/workoutDb';
 import { ensurePersistentStorage } from '../utils/storagePersistence';
+import { getAllTimeBest, isBestStale, roundWeight } from '../utils/workoutHelpers';
+import {
+  pickBackupFolder,
+  writeBackup,
+  isBackupDue,
+  ensureWritePermission
+} from '../utils/autoBackup';
+
+// The backup folder handle is a live browser object, not data. It lives in the
+// preferences table so it survives restarts, but it must never be written into
+// an export payload — JSON.stringify would silently turn it into `{}`.
+const BACKUP_HANDLE_KEY = 'backupFolderHandle';
+
+const toPlainPreferences = (entries) => {
+  const prefs = {};
+  entries.forEach((p) => {
+    if (p.key !== BACKUP_HANDLE_KEY) prefs[p.key] = p.value;
+  });
+  return prefs;
+};
 
 // Default exercises backup list (for reset/seeding fallback)
 const DEFAULT_EXERCISES = [
@@ -40,6 +60,23 @@ const DEFAULT_EXERCISES = [
     exerciseType: 'compound',
     restDuration: 120,
     weightStep: 2
+  },
+  ...LEG_EXERCISES
+];
+
+// Routines restored by a full data reset, mirroring the fresh-install seed.
+const DEFAULT_ROUTINES = [
+  {
+    id: PUSH_ROUTINE_ID,
+    name: 'Push',
+    exerciseIds: ['db-shoulder-press', 'lateral-raises', 'db-chest-press'],
+    order: 0
+  },
+  {
+    id: LEGS_ROUTINE_ID,
+    name: 'Legs',
+    exerciseIds: LEG_EXERCISES.map((ex) => ex.id),
+    order: 1
   }
 ];
 
@@ -54,6 +91,9 @@ export const useWorkoutState = () => {
   
   // Sort history newest to oldest for easy listing
   const history = useLiveQuery(() => db.history.orderBy('timestamp').reverse().toArray()) || [];
+
+  // Routines in display order (Push, Legs, ...)
+  const routines = useLiveQuery(() => db.routines.orderBy('order').toArray()) || [];
 
   const preferencesObj = useLiveQuery(async () => {
     const arr = await db.preferences.toArray();
@@ -211,6 +251,60 @@ export const useWorkoutState = () => {
     await db.preferences.put({ key, value });
   };
 
+  // --- Automatic backup ----------------------------------------------------
+
+  // Read straight from the database rather than the live queries: this runs
+  // immediately after a workout is written, and the live query hasn't caught up.
+  const buildBackupPayload = async () => {
+    const [exs, hist, prefEntries, rts] = await Promise.all([
+      db.exercises.toArray(),
+      db.history.toArray(),
+      db.preferences.toArray(),
+      db.routines.toArray()
+    ]);
+    return {
+      exercises: exs,
+      history: hist,
+      preferences: toPlainPreferences(prefEntries),
+      routines: rts
+    };
+  };
+
+  const writeBackupNow = async (handle) => {
+    const payload = await buildBackupPayload();
+    const name = await writeBackup(handle, payload);
+    if (name) await db.preferences.put({ key: 'lastBackupAt', value: Date.now() });
+    return name;
+  };
+
+  // Choose the folder. Must run from a click — the picker requires a gesture.
+  const chooseBackupFolder = async () => {
+    const handle = await pickBackupFolder();
+    if (!handle) return null;
+    await db.preferences.put({ key: BACKUP_HANDLE_KEY, value: handle });
+    // Write one immediately, so the setup is proven rather than assumed.
+    await writeBackupNow(handle);
+    return handle.name;
+  };
+
+  const forgetBackupFolder = async () => {
+    await db.preferences.delete(BACKUP_HANDLE_KEY);
+  };
+
+  // Called after a workout is saved. Silent by design: no folder, no permission,
+  // or not yet due are all normal states, not failures worth interrupting for.
+  const maybeAutoBackup = async () => {
+    const stored = await db.preferences.get(BACKUP_HANDLE_KEY);
+    const handle = stored?.value;
+    if (!handle) return null;
+
+    const lastAt = (await db.preferences.get('lastBackupAt'))?.value || null;
+    if (!isBackupDue(lastAt, Date.now())) return null;
+    if (!(await ensureWritePermission(handle))) return null;
+
+    return writeBackupNow(handle);
+  };
+
   // Rest Timer controls
   const startRestTimer = (seconds) => {
     setRestEndTime(Date.now() + seconds * 1000);
@@ -227,24 +321,23 @@ export const useWorkoutState = () => {
     setRestEndTime(null);
   };
 
-  // Helper: Find the last weight logged for an exercise (from working sets only)
+  // Helper: heaviest working weight from the most recent session containing
+  // this exercise. Previously this returned the *first* working set, which on a
+  // ramped session (40 → 45 → 50) prefilled the warm-up-ish opener rather than
+  // what was actually worked. Returns null when there is nothing logged, so
+  // callers can distinguish "no history" from "lifted 0 kg".
   const getLastLoggedWeight = (exerciseId) => {
     // History is already sorted newest to oldest from the Dexie live query!
     for (const session of history) {
       const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
       if (ex && ex.sets && ex.sets.length > 0) {
-        const workingSets = ex.sets.filter(s => !s.isWarmup);
-        const firstWorkingWithWeight = workingSets.find(s => parseFloat(s.weight) > 0);
-        if (firstWorkingWithWeight) {
-          return parseFloat(firstWorkingWithWeight.weight);
-        }
-        if (workingSets.length > 0) {
-          return parseFloat(workingSets[0].weight) || 0;
-        }
-        return parseFloat(ex.sets[0].weight) || 0;
+        const workingSets = ex.sets.filter((s) => !s.isWarmup);
+        const source = workingSets.length > 0 ? workingSets : ex.sets;
+        const weights = source.map((s) => parseFloat(s.weight) || 0);
+        return weights.length > 0 ? Math.max(...weights) : null;
       }
     }
-    return 10; // Default fallback
+    return null;
   };
 
   // Helper: Find the last reps logged for an exercise
@@ -262,12 +355,47 @@ export const useWorkoutState = () => {
     return null;
   };
 
-  // Start a new workout session
-  const startWorkout = () => {
-    const workoutExercises = exercises.map((ex) => {
-      const lastWeight = getLastLoggedWeight(ex.id);
-      const lastRepsList = getLastLoggedReps(ex.id);
-      
+  // Start a new workout session for a routine.
+  //
+  // The routine's exerciseIds decide both *which* exercises appear and in what
+  // order. If the id is unknown (or omitted) we fall back to the whole library,
+  // which is exactly the pre-routines behaviour — so a missing routine degrades
+  // to a valid session rather than an empty one.
+  const startWorkout = (routineId) => {
+    const routine = routines.find((r) => r.id === routineId);
+
+    const sourceExercises = routine
+      ? routine.exerciseIds
+          .map((id) => exercises.find((ex) => ex.id === id))
+          .filter(Boolean)
+      : exercises;
+
+    if (sourceExercises.length === 0) return;
+
+    // Prefill anchors on the heaviest weight ever completed, not the last
+    // session — so one bad day doesn't reset the target. The staleness guard
+    // stops that becoming a trap: a best older than STALE_BEST_DAYS means the
+    // strength is likely gone, so we fall back to what was actually lifted
+    // most recently. Date.now() is safe here (event handler, not render).
+    const startedAt = Date.now();
+
+    const workoutExercises = sourceExercises.map((ex) => {
+      const best = getAllTimeBest(ex.id, history);
+      const useBest = best !== null && !isBestStale(best, startedAt);
+
+      const loggedWeight = useBest ? best.weight : getLastLoggedWeight(ex.id);
+      const lastRepsList = useBest ? best.reps : getLastLoggedReps(ex.id);
+
+      // With no history at all, fall back to the exercise's configured starting
+      // weight — and if that isn't set either, leave the field blank. Inventing
+      // a number here (it used to hard-code 10 kg) is worse than asking: on a
+      // leg press the empty sled alone can outweigh the guess.
+      const lastWeight = loggedWeight !== null
+        ? loggedWeight
+        : (typeof ex.startingWeight === 'number' && ex.startingWeight > 0
+            ? ex.startingWeight
+            : '');
+
       const sets = [];
       const numSets = ex.targetSets || 4;
       for (let i = 0; i < numSets; i++) {
@@ -297,7 +425,11 @@ export const useWorkoutState = () => {
 
     setCurrentWorkout({
       id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
-      startTime: Date.now(),
+      startTime: startedAt,
+      routineId: routine?.id || null,
+      // Denormalised so history stays readable if the routine is later
+      // renamed or deleted.
+      routineName: routine?.name || null,
       exercises: workoutExercises
     });
   };
@@ -339,6 +471,8 @@ export const useWorkoutState = () => {
       id: currentWorkout.id,
       timestamp: Date.now(),
       duration: Math.round((Date.now() - currentWorkout.startTime) / 1000 / 60),
+      routineId: currentWorkout.routineId || null,
+      routineName: currentWorkout.routineName || null,
       exercises: sanitizedExercises
     };
 
@@ -346,6 +480,11 @@ export const useWorkoutState = () => {
     await db.history.add(completedSession);
     setCurrentWorkout(null);
     clearRestTimer();
+
+    // Finishing a workout is the natural checkpoint: the data just changed and
+    // we're inside a user gesture, which is when file writes are permitted.
+    maybeAutoBackup();
+
     return completedSession;
   };
 
@@ -450,9 +589,9 @@ export const useWorkoutState = () => {
         const lastSet = ex.sets[ex.sets.length - 1];
         const newSet = lastSet
           ? { ...lastSet, completed: false, completedAt: null, rpe: '', rir: '' }
-          : { 
-              weight: getLastLoggedWeight(exerciseId), 
-              reps: ex.targetRange.min, 
+          : {
+              weight: getLastLoggedWeight(exerciseId) ?? '',
+              reps: ex.targetRange.min,
               completed: false, 
               isWarmup: false, 
               rpe: '', 
@@ -517,11 +656,16 @@ export const useWorkoutState = () => {
     }));
   };
 
-  // Add a custom exercise to global config
-  const addExerciseToConfig = async (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120, weightStep) => {
+  // Add a custom exercise to the global library and attach it to a routine.
+  //
+  // The routine attachment matters: an exercise that belongs to no routine can
+  // never appear in a session, so it would look silently broken. When no
+  // routine is given we append to the first one rather than orphan it.
+  const addExerciseToConfig = async (name, targetSets = 4, minReps = 10, maxReps = 12, muscleGroup = 'Other', exerciseType = 'compound', restDuration = 120, weightStep, routineId, startingWeight) => {
     if (!name.trim()) return;
     const id = `custom-config-${Date.now()}`;
-    const parsedStep = parseInt(weightStep);
+    const parsedStep = roundWeight(weightStep);
+    const parsedStart = roundWeight(startingWeight);
     const newEx = {
       id,
       name: name.trim(),
@@ -532,9 +676,17 @@ export const useWorkoutState = () => {
       muscleGroup,
       exerciseType,
       restDuration: parseInt(restDuration) || 120,
-      weightStep: parsedStep > 0 ? parsedStep : defaultWeightStep(exerciseType)
+      weightStep: parsedStep > 0 ? parsedStep : defaultWeightStep(exerciseType),
+      startingWeight: parsedStart > 0 ? parsedStart : null
     };
     await db.exercises.add(newEx);
+
+    const target = routines.find((r) => r.id === routineId) || routines[0];
+    if (target) {
+      await db.routines.update(target.id, {
+        exerciseIds: [...target.exerciseIds, id]
+      });
+    }
   };
 
   // Update exercise in global config
@@ -542,27 +694,70 @@ export const useWorkoutState = () => {
     await db.exercises.update(id, updatedFields);
   };
 
-  // Delete exercise from global config
+  // Delete exercise from global config, and drop it from any routine that
+  // referenced it — otherwise the routine keeps a dangling id forever.
   const deleteExerciseFromConfig = async (id) => {
-    await db.exercises.delete(id);
+    await db.transaction('rw', [db.exercises, db.routines], async () => {
+      await db.exercises.delete(id);
+
+      const affected = await db.routines
+        .filter((r) => r.exerciseIds.includes(id))
+        .toArray();
+
+      await Promise.all(
+        affected.map((r) =>
+          db.routines.update(r.id, {
+            exerciseIds: r.exerciseIds.filter((exId) => exId !== id)
+          })
+        )
+      );
+    });
   };
 
-  // Reorder exercises in global config
-  const reorderExercises = async (startIndex, endIndex) => {
-    const result = Array.from(exercises);
-    const [removed] = result.splice(startIndex, 1);
-    result.splice(endIndex, 0, removed);
-    
-    // Rewrite all to enforce re-ordered array
-    await db.transaction('rw', db.exercises, async () => {
-      await db.exercises.clear();
-      await db.exercises.bulkAdd(result);
+  // --- Routine management --------------------------------------------------
+
+  const addRoutine = async (name) => {
+    if (!name.trim()) return;
+    const maxOrder = routines.reduce((max, r) => Math.max(max, r.order ?? 0), -1);
+    await db.routines.add({
+      id: `routine-${Date.now()}`,
+      name: name.trim(),
+      exerciseIds: [],
+      order: maxOrder + 1
+    });
+  };
+
+  const renameRoutine = async (routineId, name) => {
+    if (!name.trim()) return;
+    await db.routines.update(routineId, { name: name.trim() });
+  };
+
+  const deleteRoutine = async (routineId) => {
+    await db.routines.delete(routineId);
+  };
+
+  // Add/remove an exercise's membership in a routine without touching the
+  // exercise itself — the library is shared, routines just reference it.
+  const setExerciseInRoutine = async (routineId, exerciseId, member) => {
+    const routine = routines.find((r) => r.id === routineId);
+    if (!routine) return;
+
+    const has = routine.exerciseIds.includes(exerciseId);
+    if (member === has) return;
+
+    await db.routines.update(routineId, {
+      exerciseIds: member
+        ? [...routine.exerciseIds, exerciseId]
+        : routine.exerciseIds.filter((id) => id !== exerciseId)
     });
   };
 
   // Export data as JSON
   const exportData = () => {
-    const dataStr = JSON.stringify({ exercises, history, preferences });
+    const plainPrefs = toPlainPreferences(
+      Object.entries(preferences).map(([key, value]) => ({ key, value }))
+    );
+    const dataStr = JSON.stringify({ exercises, history, preferences: plainPrefs, routines });
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const exportFileDefaultName = `hypertrophy_tracker_backup_${new Date().toISOString().split('T')[0]}.json`;
 
@@ -580,7 +775,7 @@ export const useWorkoutState = () => {
     try {
       const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
       
-      await db.transaction('rw', [db.exercises, db.history, db.preferences], async () => {
+      await db.transaction('rw', [db.exercises, db.history, db.preferences, db.routines], async () => {
         if (parsed.exercises && Array.isArray(parsed.exercises)) {
           await db.exercises.clear();
           await db.exercises.bulkAdd(parsed.exercises);
@@ -589,10 +784,32 @@ export const useWorkoutState = () => {
           await db.history.clear();
           await db.history.bulkAdd(parsed.history);
         }
+        // Backups taken before routines existed have no `routines` key. Rather
+        // than leave the user with zero routines (and so no way to start a
+        // session), rebuild a single routine holding the imported library.
+        if (parsed.routines && Array.isArray(parsed.routines)) {
+          await db.routines.clear();
+          await db.routines.bulkAdd(parsed.routines);
+        } else if (parsed.exercises && Array.isArray(parsed.exercises)) {
+          await db.routines.clear();
+          await db.routines.add({
+            id: PUSH_ROUTINE_ID,
+            name: 'Push',
+            exerciseIds: parsed.exercises.map((ex) => ex.id),
+            order: 0
+          });
+        }
         if (parsed.preferences) {
+          // The backup folder is device configuration, not restorable data —
+          // carry it across so restoring a backup doesn't silently disable
+          // future backups.
+          const keptHandle = await db.preferences.get(BACKUP_HANDLE_KEY);
           await db.preferences.clear();
-          const prefArray = Object.entries(parsed.preferences).map(([key, value]) => ({ key, value }));
+          const prefArray = Object.entries(parsed.preferences)
+            .filter(([key]) => key !== BACKUP_HANDLE_KEY)
+            .map(([key, value]) => ({ key, value }));
           await db.preferences.bulkPut(prefArray);
+          if (keptHandle) await db.preferences.put(keptHandle);
         }
       });
       return true;
@@ -604,11 +821,13 @@ export const useWorkoutState = () => {
 
   // Reset all data
   const clearAllData = async () => {
-    await db.transaction('rw', [db.exercises, db.history, db.preferences], async () => {
+    await db.transaction('rw', [db.exercises, db.history, db.preferences, db.routines], async () => {
       await db.exercises.clear();
       await db.history.clear();
       await db.preferences.clear();
+      await db.routines.clear();
       await db.exercises.bulkAdd(DEFAULT_EXERCISES);
+      await db.routines.bulkAdd(DEFAULT_ROUTINES);
       await db.preferences.add({ key: 'prefLoggingMode', value: 'RPE' });
     });
     localStorage.removeItem('hypertrophy_current_workout');
@@ -620,6 +839,7 @@ export const useWorkoutState = () => {
   return {
     exercises,
     history,
+    routines,
     currentWorkout,
     preferences,
     restEndTime,
@@ -638,11 +858,17 @@ export const useWorkoutState = () => {
     addExerciseToConfig,
     updateExerciseInConfig,
     deleteExerciseFromConfig,
-    reorderExercises,
+    addRoutine,
+    renameRoutine,
+    deleteRoutine,
+    setExerciseInRoutine,
     exportData,
     importData,
     clearAllData,
     storagePersisted,
-    requestPersistentStorage
+    requestPersistentStorage,
+    chooseBackupFolder,
+    forgetBackupFolder,
+    backupFolderName: preferences?.[BACKUP_HANDLE_KEY]?.name || null
   };
 };

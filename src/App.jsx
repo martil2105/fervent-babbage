@@ -17,7 +17,15 @@ export default function App() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard history={workoutState.history} exercises={workoutState.exercises} />;
+        return (
+          <Dashboard
+            history={workoutState.history}
+            exercises={workoutState.exercises}
+            lastBackupAt={workoutState.preferences?.lastBackupAt || null}
+            hasBackupFolder={!!workoutState.backupFolderName}
+            exportData={workoutState.exportData}
+          />
+        );
       case 'workout':
         return (
           <WorkoutActive 
@@ -29,6 +37,7 @@ export default function App() {
             addSetToActive={workoutState.addSetToActive}
             removeSetFromActive={workoutState.removeSetFromActive}
             addCustomExerciseToActive={workoutState.addCustomExerciseToActive}
+            routines={workoutState.routines}
             history={workoutState.history}
             preferences={workoutState.preferences}
             restEndTime={workoutState.restEndTime}
@@ -48,13 +57,21 @@ export default function App() {
         );
       case 'settings':
         return (
-          <Settings 
+          <Settings
             exercises={workoutState.exercises}
+            routines={workoutState.routines}
             preferences={workoutState.preferences}
             updatePreference={workoutState.updatePreference}
             addExerciseToConfig={workoutState.addExerciseToConfig}
             updateExerciseInConfig={workoutState.updateExerciseInConfig}
             deleteExerciseFromConfig={workoutState.deleteExerciseFromConfig}
+            addRoutine={workoutState.addRoutine}
+            renameRoutine={workoutState.renameRoutine}
+            deleteRoutine={workoutState.deleteRoutine}
+            setExerciseInRoutine={workoutState.setExerciseInRoutine}
+            chooseBackupFolder={workoutState.chooseBackupFolder}
+            forgetBackupFolder={workoutState.forgetBackupFolder}
+            backupFolderName={workoutState.backupFolderName}
             exportData={workoutState.exportData}
             importData={workoutState.importData}
             clearAllData={workoutState.clearAllData}
@@ -73,7 +90,7 @@ export default function App() {
       <header className="app-header">
         <h1 className="app-title">
           <Dumbbell size={24} style={{ transform: 'rotate(-45deg)' }} />
-          PUSH.HYPERTROPHY
+          HYPERTROPHY.LOG
         </h1>
         {currentWorkout && activeTab !== 'workout' && (
           <div 

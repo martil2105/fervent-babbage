@@ -1,9 +1,22 @@
 /**
  * Workout Helpers
- * Utility functions for Push Hypertrophy Trainer calculations and data analysis.
+ * Utility functions for hypertrophy training calculations and data analysis.
  */
 
-export const MUSCLE_GROUPS = ['Chest', 'Shoulders', 'Triceps', 'Lats', 'Back', 'Legs', 'Abs', 'Other'];
+// Groups offered when tagging an exercise. Legs is split four ways so that a
+// leg session reads honestly next to the three push groups — a single "Legs"
+// bar would always look under-trained beside Chest + Shoulders + Triceps.
+export const SELECTABLE_MUSCLE_GROUPS = [
+  'Chest', 'Shoulders', 'Triceps', 'Lats', 'Back',
+  'Quads', 'Hamstrings', 'Glutes', 'Calves',
+  'Abs', 'Other'
+];
+
+// Aggregation/display list. Keeps the retired 'Legs' value at the end so any
+// exercise tagged before the split still shows up in the dashboard breakdown
+// and balance chart instead of silently vanishing. Both consumers hide groups
+// with zero sets, so it costs nothing when unused.
+export const MUSCLE_GROUPS = [...SELECTABLE_MUSCLE_GROUPS, 'Legs'];
 
 // Calculate volume load of a set: weight * reps (returns 0 for warmups)
 export const getSetVolume = (weight, reps, isWarmup = false) => {
@@ -252,7 +265,7 @@ export const getLastSessionSets = (exerciseId, sessions) => {
  * AND the last working set's RPE was <= 9 (i.e. there was room/RIR >= 1).
  * If reps were met but RPE was 10 (or RIR = 0), suggest holding the weight.
  */
-export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef) => {
+export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef, now) => {
   if (!sessions || !Array.isArray(sessions) || sessions.length === 0) {
     return {
       type: 'initial',
@@ -260,19 +273,9 @@ export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef) => {
     };
   }
 
-  // Find the last session that contains this exercise
-  let lastExerciseData = null;
-
-  // Search from most recent to oldest
-  const sortedSessions = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
-  
-  for (const session of sortedSessions) {
-    const exData = session.exercises.find((ex) => ex.exerciseId === exerciseId);
-    if (exData && exData.sets && exData.sets.length > 0) {
-      lastExerciseData = exData;
-      break;
-    }
-  }
+  // Judge against the same session the weight prefill anchors to, so the hint
+  // and the loaded weight can never contradict each other.
+  const lastExerciseData = getReferenceExerciseData(exerciseId, sessions, now);
 
   if (!lastExerciseData) {
     return {
@@ -550,4 +553,168 @@ export const getPersonalBests = (sessions) => {
   });
 
   return pbs;
+};
+
+// Weights are stored in whole or half kilograms. Half-kilo granularity exists
+// so 2.5 kg dumbbells and 1.25 kg microplates can be expressed; anything finer
+// is gym-equipment fiction and just produces float noise.
+export const WEIGHT_PRECISION = 0.5;
+
+/** Snap a weight to the nearest half kilogram. Returns 0 for junk input. */
+export const roundWeight = (value) => {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n / WEIGHT_PRECISION) * WEIGHT_PRECISION;
+};
+
+/** Render a weight without trailing float noise: 12.5 → "12.5", 12.0 → "12". */
+export const formatWeight = (value) => {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+};
+
+// A personal best older than this is treated as detrained: the prefill falls
+// back to the most recent session instead. Without this the all-time anchor is
+// a one-way ratchet — after illness or a holiday it would keep demanding a
+// weight that can no longer be lifted, every session, with no way down.
+export const STALE_BEST_DAYS = 21;
+
+/**
+ * The heaviest working weight ever completed for an exercise.
+ *
+ * Returns `{ weight, reps, topSetReps, bestReps, timestamp }` where:
+ *   - `weight`      heaviest completed working weight ever recorded
+ *   - `timestamp`   the most recent session in which that weight was lifted
+ *   - `reps`        that session's working-set reps, in set order, so the
+ *                   natural fatigue drop-off across sets is preserved
+ *   - `topSetReps`  best reps at that weight within that session
+ *   - `bestReps`    best reps ever at that weight, across all sessions
+ *
+ * Warmups and unchecked sets are excluded via isCountableSet. Returns null if
+ * the exercise has never been logged with a weight above zero.
+ */
+export const getAllTimeBest = (exerciseId, sessions) => {
+  if (!sessions || !Array.isArray(sessions) || !exerciseId) return null;
+
+  // Pass 1 — the heaviest weight ever completed.
+  let maxWeight = 0;
+  sessions.forEach((session) => {
+    session?.exercises?.forEach((ex) => {
+      if (ex.exerciseId !== exerciseId) return;
+      (ex.sets || []).forEach((set) => {
+        if (!isCountableSet(set)) return;
+        const w = parseFloat(set.weight) || 0;
+        if (w > maxWeight) maxWeight = w;
+      });
+    });
+  });
+
+  if (maxWeight <= 0) return null;
+
+  // Pass 2 — the most recent session that used it, and the best reps ever at it.
+  let best = null;
+  let bestReps = 0;
+
+  sessions.forEach((session) => {
+    session?.exercises?.forEach((ex) => {
+      if (ex.exerciseId !== exerciseId) return;
+
+      const countable = (ex.sets || []).filter(isCountableSet);
+      const atTopWeight = countable.filter(
+        (s) => (parseFloat(s.weight) || 0) === maxWeight
+      );
+      if (atTopWeight.length === 0) return;
+
+      atTopWeight.forEach((s) => {
+        const r = parseInt(s.reps) || 0;
+        if (r > bestReps) bestReps = r;
+      });
+
+      if (best === null || session.timestamp > best.timestamp) {
+        best = {
+          weight: maxWeight,
+          timestamp: session.timestamp,
+          reps: countable.map((s) => parseInt(s.reps) || 0),
+          topSetReps: Math.max(...atTopWeight.map((s) => parseInt(s.reps) || 0))
+        };
+      }
+    });
+  });
+
+  return best === null ? null : { ...best, bestReps };
+};
+
+/**
+ * Whether an all-time best is too old to train from. `now` is passed in so the
+ * function stays pure (react-compiler forbids Date.now() during render).
+ */
+export const isBestStale = (best, now) => {
+  if (!best) return true;
+  return now - best.timestamp > STALE_BEST_DAYS * 86400000;
+};
+
+/**
+ * The session's worth of sets that progression should be judged against.
+ *
+ * This is the single source of truth shared by the weight prefill and the
+ * coaching hint — previously the prefill read your best while the hint read
+ * your last session, so after an off day they disagreed about what to do next.
+ *
+ * Normally that's the most recent session at your all-time-best weight. If the
+ * best is stale (see isBestStale) it falls back to the latest session, so a
+ * layoff doesn't leave you being coached against a weight you can't lift.
+ * Omit `now` to skip the staleness check entirely.
+ */
+export const getReferenceExerciseData = (exerciseId, sessions, now) => {
+  if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return null;
+
+  const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+
+  const best = getAllTimeBest(exerciseId, sessions);
+  const useBest =
+    best !== null && (typeof now !== 'number' || !isBestStale(best, now));
+
+  if (useBest) {
+    const session = sorted.find((s) => s.timestamp === best.timestamp);
+    const ex = session?.exercises?.find((e) => e.exerciseId === exerciseId);
+    if (ex && ex.sets && ex.sets.length > 0) return ex;
+  }
+
+  for (const session of sorted) {
+    const ex = session.exercises?.find((e) => e.exerciseId === exerciseId);
+    if (ex && ex.sets && ex.sets.length > 0) return ex;
+  }
+
+  return null;
+};
+
+/**
+ * Timestamp of the most recent session for a routine, or null if never trained.
+ * Sessions logged before routines existed have no routineId and are ignored.
+ */
+export const getRoutineLastTrained = (sessions, routineId) => {
+  if (!sessions || !Array.isArray(sessions) || !routineId) return null;
+
+  let latest = null;
+  sessions.forEach((session) => {
+    if (session?.routineId !== routineId) return;
+    if (latest === null || session.timestamp > latest) {
+      latest = session.timestamp;
+    }
+  });
+
+  return latest;
+};
+
+/**
+ * Whole days since a routine was last trained, given an explicit clock reading.
+ * `now` is passed in rather than read here so callers stay pure — the eslint
+ * react-compiler rule rejects Date.now() during render.
+ * Returns null when the routine has never been trained.
+ */
+export const getDaysSinceRoutine = (sessions, routineId, now) => {
+  const last = getRoutineLastTrained(sessions, routineId);
+  if (last === null) return null;
+  return Math.max(0, Math.floor((now - last) / 86400000));
 };
