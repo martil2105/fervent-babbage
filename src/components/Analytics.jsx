@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, Flame, Activity, Scale } from 'lucide-react';
+import { TrendingUp, TrendingDown, Flame, Activity, Scale, Layers } from 'lucide-react';
 import {
   getExerciseProgression,
   getSessionAvgRpe,
@@ -95,6 +95,23 @@ export default function Analytics({ history, exercises }) {
   const changePct =
     series.length >= 2 && first.est1RM > 0
       ? Math.round(((latest.est1RM - first.est1RM) / first.est1RM) * 100)
+      : null;
+
+  // --- Volume load chart data ----------------------------------------------
+  // Volume load (Σ weight × reps over countable sets) is the work-done twin of
+  // est. 1RM: it moves when back-off sets improve but the top set doesn't.
+  // Deliberately its own panel with its own kg axis — plotting it as a second
+  // y-axis on the strength chart would invent a correlation between two scales
+  // that have nothing to do with each other.
+  const volumeData = series.map((p) => ({
+    label: shortDate(p.timestamp),
+    volume: Math.round(p.volume)
+  }));
+
+  const bestVolume = series.reduce((max, p) => Math.max(max, p.volume), 0);
+  const volumeChangePct =
+    series.length >= 2 && first.volume > 0
+      ? Math.round(((latest.volume - first.volume) / first.volume) * 100)
       : null;
 
   // --- Consistency heatmap (last 12 weeks, Mon–Sun columns) ----------------
@@ -301,7 +318,64 @@ export default function Analytics({ history, exercises }) {
         )}
       </div>
 
-      {/* 3. Consistency heatmap */}
+      {/* 3. Volume load (work-done twin of the strength panel above) */}
+      {volumeData.length >= 2 && (
+        <div className="card" style={{ padding: '16px 8px 12px 8px' }}>
+          <h4 className="chart-title" style={{ margin: '0 0 4px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Layers size={16} style={{ color: 'var(--accent-strong)' }} />
+            Volume Load
+          </h4>
+          <p className="text-xs text-muted" style={{ margin: '0 0 10px 16px' }}>
+            Total weight × reps per session{activeExercise ? ` for ${activeExercise.name}` : ''} —
+            counts every working set, so extra reps on your back-off sets show up here
+            even when the top set is unchanged. Switch exercise with the chips above.
+          </p>
+
+          <div style={{ width: '100%', height: 160 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={volumeData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} width={48} />
+                <Tooltip
+                  cursor={{ fill: 'var(--bg-secondary)' }}
+                  contentStyle={tooltipStyle}
+                  labelStyle={{ color: 'var(--text-secondary)', fontWeight: 600 }}
+                  itemStyle={{ fontWeight: 600 }}
+                  formatter={(value) => [`${value} kg`, 'Volume load']}
+                />
+                <Bar dataKey="volume" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Volume summary row */}
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '10px', padding: '10px 8px 4px 8px', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ textAlign: 'center' }}>
+              <span className="text-xs text-muted text-bold">BEST SESSION</span>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(bestVolume)} kg</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <span className="text-xs text-muted text-bold">LATEST</span>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(latest.volume)} kg</div>
+            </div>
+            {volumeChangePct !== null && (
+              <div style={{ textAlign: 'center' }}>
+                <span className="text-xs text-muted text-bold">SINCE FIRST LOG</span>
+                <div style={{
+                  fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px',
+                  color: volumeChangePct > 0 ? 'var(--success-strong)' : volumeChangePct < 0 ? 'var(--error-strong)' : 'var(--text-secondary)'
+                }}>
+                  {volumeChangePct > 0 ? <TrendingUp size={15} /> : volumeChangePct < 0 ? <TrendingDown size={15} /> : null}
+                  {volumeChangePct > 0 ? '+' : ''}{volumeChangePct}%
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Consistency heatmap */}
       <div className="card">
         <h4 className="chart-title" style={{ margin: '0 0 4px 0', paddingLeft: 0 }}>Training Consistency</h4>
         <p className="text-xs text-muted" style={{ margin: '0 0 12px 0' }}>
@@ -339,7 +413,7 @@ export default function Analytics({ history, exercises }) {
         </div>
       </div>
 
-      {/* 4. Effort trend */}
+      {/* 5. Effort trend */}
       <div className="card" style={{ padding: '16px 8px 12px 8px' }}>
         <h4 className="chart-title" style={{ margin: '0 0 4px 8px' }}>Effort Trend</h4>
         <p className="text-xs text-muted" style={{ margin: '0 0 10px 16px' }}>
@@ -369,7 +443,7 @@ export default function Analytics({ history, exercises }) {
         )}
       </div>
 
-      {/* 5. Muscle balance */}
+      {/* 6. Muscle balance */}
       <div className="card">
         <h4 className="chart-title" style={{ margin: '0 0 4px 0', paddingLeft: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Scale size={16} style={{ color: 'var(--accent-strong)' }} />

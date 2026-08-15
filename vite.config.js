@@ -14,8 +14,11 @@ export default defineConfig({
         name: 'Hypertrophy Log',
         short_name: 'HypLog',
         description: 'Track your hypertrophy training sessions offline.',
-        theme_color: '#0f1015',
-        background_color: '#0f1015',
+        // Verdant light theme: --surface-canvas (#F7F8FA), same value as the
+        // theme-color meta tag in index.html. Keep the two in sync — these
+        // drive the PWA splash screen and the mobile browser status bar.
+        theme_color: '#F7F8FA',
+        background_color: '#F7F8FA',
         display: 'standalone',
         orientation: 'portrait',
         icons: [
