@@ -115,8 +115,7 @@ export default function App() {
               height: '6px', 
               borderRadius: '50%', 
               backgroundColor: 'var(--success)',
-              display: 'inline-block',
-              animation: 'pulse 1.5s infinite'
+              display: 'inline-block'
             }}></span>
             ACTIVE SESSION
           </div>
@@ -184,15 +183,6 @@ export default function App() {
           <span>Settings</span>
         </button>
       </nav>
-
-      {/* Styles for pulsing badge */}
-      <style>{`
-        @keyframes pulse {
-          0% { transform: scale(0.9); opacity: 0.6; }
-          50% { transform: scale(1.2); opacity: 1; }
-          100% { transform: scale(0.9); opacity: 0.6; }
-        }
-      `}</style>
     </>
   );
 }

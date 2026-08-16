@@ -95,9 +95,10 @@ html, body {
 .app-header {
   position: sticky;
   top: 0;
-  background-color: rgba(247, 248, 250, 0.8); /* light glass */
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  /* Opaque, not glass. A blurred translucent pane is a depth effect, and depth
+   * is the thing this system spends hairlines instead of — the border below
+   * already separates the header from what scrolls under it. */
+  background-color: var(--bg-primary);
   padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px; /* Safe area top for notch/Dynamic Island */
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -135,9 +136,7 @@ html, body {
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  background-color: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background-color: var(--bg-card);
   border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: space-around;

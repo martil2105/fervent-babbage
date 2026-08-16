@@ -36,6 +36,8 @@
   --sun-400: #FFCB24;
   --sun-500: #FFC800;
   --sun-600: #E0A400;
+  /* 3.6:1 on white — FAILS AA. Sun is fills, icons and streak marks only;
+   * never let this step (or any sun step) carry text. */
   --sun-700: #B37E00;
   --sun-800: #8A6000;
   --sun-900: #6B4A00;

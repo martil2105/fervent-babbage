@@ -834,7 +834,7 @@ export default function Settings({
             padding: '10px 12px',
             borderRadius: 'var(--radius-md)',
             border: '1px solid',
-            borderColor: storagePersisted ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)',
+            borderColor: storagePersisted ? 'var(--feather-200)' : 'var(--fox-200)',
             backgroundColor: storagePersisted ? 'var(--success-glow)' : 'var(--warning-glow)'
           }}>
             {storagePersisted
@@ -903,7 +903,7 @@ export default function Settings({
       </div>
 
       {/* 4. Danger Zone */}
-      <div className="card" style={{ borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+      <div className="card" style={{ borderColor: 'var(--cardinal-200)' }}>
         <h3 className="card-title" style={{ color: 'var(--error-strong)' }}>Danger Zone</h3>
         <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
           Resetting the app will permanently delete all your custom exercises, set histories, and active workouts. This cannot be undone.
@@ -916,7 +916,7 @@ export default function Settings({
       {/* Reset Confirmation Modal */}
       {showResetConfirm && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
+          <div className="modal-content" style={{ borderColor: 'var(--cardinal-300)' }}>
             <h3 style={{ margin: 0, color: 'var(--error-strong)' }}>Reset All Data?</h3>
             <p className="text-muted" style={{ margin: 0, fontSize: '14px', lineHeight: '1.4' }}>
               Are you absolutely sure you want to clear all data? This will erase your entire workout history and restore the default settings.

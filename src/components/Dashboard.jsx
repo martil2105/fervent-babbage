@@ -190,7 +190,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
                     <stop offset="95%" stopColor="var(--accent)" stopOpacity={0.0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <CartesianGrid stroke="var(--border-color)" vertical={false} />
                 <XAxis 
                   dataKey="weekLabel" 
                   stroke="var(--text-secondary)" 
@@ -334,7 +334,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
             const suggestion = getProgressionSuggestion(ex.id, history, ex);
             return (
               <div key={ex.id} className="progression-hint-banner" style={{
-                borderColor: suggestion.type === 'weight' ? 'rgba(16, 185, 129, 0.25)' : suggestion.type === 'hold' ? 'rgba(99, 102, 241, 0.25)' : suggestion.type === 'reps' ? 'rgba(245, 158, 11, 0.25)' : 'var(--border-color)',
+                borderColor: suggestion.type === 'weight' ? 'var(--feather-200)' : suggestion.type === 'hold' ? 'var(--feather-200)' : suggestion.type === 'reps' ? 'var(--fox-200)' : 'var(--border-color)',
                 backgroundColor: suggestion.type === 'weight' ? 'var(--success-glow)' : suggestion.type === 'hold' ? 'var(--accent-glow)' : suggestion.type === 'reps' ? 'var(--warning-glow)' : 'var(--bg-secondary)'
               }}>
                 <Info size={16} className="progression-hint-icon" style={{

@@ -263,7 +263,7 @@ export default function Analytics({ history, exercises }) {
             <div style={{ width: '100%', height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 10, right: 12, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                  <CartesianGrid stroke="var(--border-color)" vertical={false} />
                   <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
                   <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
                   <Tooltip
@@ -334,7 +334,7 @@ export default function Analytics({ history, exercises }) {
           <div style={{ width: '100%', height: 160 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={volumeData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <CartesianGrid stroke="var(--border-color)" vertical={false} />
                 <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} width={48} />
                 <Tooltip
@@ -423,7 +423,7 @@ export default function Analytics({ history, exercises }) {
           <div style={{ width: '100%', height: 150 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={rpeData} margin={{ top: 10, right: 12, left: -25, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                <CartesianGrid stroke="var(--border-color)" vertical={false} />
                 <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} domain={[5, 10]} tickCount={6} />
                 <Tooltip
