@@ -14,6 +14,12 @@
   --accent-glow: var(--feather-50);      /* solid tint for chips / icon bg */
   --accent-strong: var(--feather-700);   /* accent TEXT / links (AA on white) */
 
+  /* Action — primary commit actions are graphite, not green. Feather is
+   * reserved for completion, records, progress and chart series. */
+  --action: var(--granite-900);
+  --action-hover: var(--granite-800);
+  --action-text: var(--granite-0);
+
   --text-primary: var(--granite-900);    /* headings / primary text */
   --text-secondary: var(--granite-600);  /* body-muted (AA) */
   --text-muted: var(--granite-500);      /* captions */
@@ -36,10 +42,12 @@
   --radius-md: 14px;
   --radius-lg: 20px;
 
-  /* Flat, minimal elevation — soft neutral shadows, no chunky 3D. */
-  --shadow-sm: 0 1px 2px rgba(18, 21, 26, 0.06);
-  --shadow-md: 0 4px 12px rgba(18, 21, 26, 0.08);
-  --shadow-lg: 0 12px 28px rgba(18, 21, 26, 0.12);
+  /* Elevation removed — nothing floats. Separation is air and one hairline.
+   * Tokens kept as `none` so any remaining box-shadow declaration is inert. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --ring-hairline: inset 0 0 0 1px var(--border-color); /* lift without raising */
 
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -70,9 +78,17 @@ html, body {
   display: flex;
   flex-direction: column;
   background-color: var(--bg-primary);
-  box-shadow: var(--shadow-lg);
   position: relative;
   overflow: hidden; /* Lock scroll boundaries to app content */
+}
+
+/* The app column is separated from the page by a hairline, not a drop shadow —
+ * and only where there is actually a page around it. */
+@media (min-width: 481px) {
+  #root {
+    border-left: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+  }
 }
 
 /* App Layout */
@@ -94,9 +110,8 @@ html, body {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  background: linear-gradient(135deg, var(--feather-600), var(--feather-800));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  /* Chrome is graphite — the wordmark is ink, not the app's only gradient. */
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -148,8 +163,10 @@ html, body {
   border-radius: var(--radius-sm);
 }
 
+/* Chrome is graphite. The active tab is marked by weight and ink, not hue. */
 .nav-tab.active {
-  color: var(--accent-strong);
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .nav-tab svg {
@@ -160,7 +177,7 @@ html, body {
 
 .nav-tab.active svg {
   transform: translateY(-2px);
-  stroke: var(--accent);
+  stroke: var(--text-primary);
 }
 
 /* Card Styles */
@@ -169,7 +186,6 @@ html, body {
   border-radius: var(--radius-md);
   padding: 16px;
   border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -195,6 +211,17 @@ html, body {
 .text-bold { font-weight: 600; }
 .text-center { text-align: center; }
 
+/* Magnitude — the numeral is the interface. Emphasis is carried by scale, not
+ * by stroke: at this size a 600-weight figure reads as shouting. Outfit 300 is
+ * already in the @import at the top of this file, so this costs nothing. */
+.magnitude {
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
 /* Buttons & Inputs */
 .btn {
   font-family: inherit;
@@ -216,12 +243,11 @@ html, body {
 }
 
 .btn-primary {
-  background-color: var(--accent);
-  color: #fff;
-  box-shadow: var(--shadow-btn);
+  background-color: var(--action);
+  color: var(--action-text);
 }
 .btn-primary:hover {
-  background-color: var(--accent-hover);
+  background-color: var(--action-hover);
 }
 
 .btn-secondary {
@@ -243,10 +269,10 @@ html, body {
   color: white;
 }
 
+/* Completion is an achievement, so this one keeps the accent. */
 .btn-success {
   background-color: var(--success);
   color: white;
-  box-shadow: var(--shadow-btn);
 }
 
 .btn-icon-only {
@@ -264,7 +290,7 @@ html, body {
 
 /* Workout Active Interface */
 .timer-banner {
-  background: linear-gradient(135deg, var(--bg-card), var(--bg-secondary));
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 14px 20px;
@@ -273,16 +299,13 @@ html, body {
   align-items: center;
 }
 
+/* Duration is chrome, not achievement — ink, and set as a figure. */
 .timer-text {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 26px;
+  font-weight: 300;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.5px;
-  color: var(--accent-strong);
-}
-
-.exercise-log-card {
-  border-left: 4px solid var(--accent);
+  line-height: 1;
+  color: var(--text-primary);
 }
 
 .exercise-log-header {
@@ -338,8 +361,9 @@ html, body {
   color: var(--text-primary);
   text-align: center;
   font-family: inherit;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   padding: 0;
 }
 
@@ -408,9 +432,12 @@ html, body {
 }
 
 .metric-value {
-  font-size: 26px;
-  font-weight: 700;
-  margin-top: 4px;
+  font-size: 34px;
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  line-height: 1;
+  margin-top: 8px;
   color: var(--text-primary);
 }
 
@@ -621,7 +648,6 @@ html, body {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 16px 8px 12px 0px; /* shift slightly to account for chart padding */
-  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -719,7 +745,7 @@ html, body {
 .sub-tab-btn.active {
   background-color: var(--bg-card);
   color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--ring-hairline);
 }
 
 /* Dialog Modal */
@@ -748,7 +774,6 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: var(--shadow-lg);
   animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -816,6 +841,7 @@ html, body {
 
 .weekly-breakdown-vol {
   font-size: 13px;
-  font-weight: 700;
-  color: var(--accent-strong);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }

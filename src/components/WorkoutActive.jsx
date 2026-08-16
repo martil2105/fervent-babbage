@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { notifyRestComplete } from '../utils/restNotification';
-import { Play, Check, Trash2, Plus, X, Dumbbell, Clock, Ghost, TrendingUp, Trophy } from 'lucide-react';
+import { Play, Check, Trash2, Plus, X, Dumbbell, Ghost, TrendingUp, Trophy } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import AccretionStrip from './AccretionStrip';
 import {
   getProgressionSuggestion,
   getLastSessionSets,
   formatDate,
   getDaysSinceRoutine,
   getAllTimeBest,
+  getAccretionSeries,
   roundWeight,
   formatWeight
 } from '../utils/workoutHelpers';
@@ -25,6 +27,7 @@ export default function WorkoutActive({
   history,
   preferences,
   restEndTime,
+  restTotalMs = 0,
   extendRestTimer,
   clearRestTimer
 }) {
@@ -41,6 +44,11 @@ export default function WorkoutActive({
   const timeRemaining = restEndTime ? restEndTime - now : 0;
   const timerSeconds = timeRemaining > 0 ? Math.ceil(timeRemaining / 1000) : 0;
   const isFlashing = restEndTime !== null && timeRemaining <= 0;
+  // The interval is read by length before it is read as a number. Fraction of
+  // the rest still owed, 1 -> 0; 0 when we have no denominator to divide by.
+  const restRemaining = restTotalMs > 0
+    ? Math.min(Math.max(timeRemaining / restTotalMs, 0), 1)
+    : 0;
 
   // Active workout duration timer
   useEffect(() => {
@@ -247,7 +255,7 @@ export default function WorkoutActive({
   };
 
   return (
-    <div className="tab-content" style={{ paddingBottom: restEndTime ? '160px' : '90px' }}>
+    <div className="tab-content" style={{ paddingBottom: restEndTime ? '172px' : '90px' }}>
       {/* 1. Timer Banner */}
       <div className="timer-banner">
         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -281,25 +289,27 @@ export default function WorkoutActive({
         // when the last session came in under it, which is the one case where
         // the prefilled weight won't match what you last actually lifted.
         const best = getAllTimeBest(ex.exerciseId, history);
+        const accretion = getAccretionSeries(ex.exerciseId, history);
         const lastTopWeight = last && last.sets.length > 0
           ? Math.max(...last.sets.map((s) => s.weight))
           : 0;
         const belowBest = best !== null && lastTopWeight < best.weight;
 
         return (
-          <div key={ex.exerciseId} className="card exercise-log-card" style={{
-            borderLeftColor: ex.exerciseType === 'isolation' ? 'var(--warning)' : 'var(--accent)'
-          }}>
+          <div key={ex.exerciseId} className="card">
             <div className="exercise-log-header">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 className="card-title" style={{ fontSize: '16px' }}>{ex.name}</h3>
-                <span className="text-xs text-bold text-muted" style={{ 
-                  backgroundColor: 'var(--bg-secondary)', 
-                  padding: '2px 8px', 
+                {/* Exercise type used to be a 4px colour bar down the whole
+                    card. It is one word — and a word costs no pigment. */}
+                <span className="text-xs text-bold text-muted" style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  padding: '2px 8px',
                   borderRadius: '10px',
-                  border: '1px solid var(--border-color)'
+                  border: '1px solid var(--border-color)',
+                  whiteSpace: 'nowrap'
                 }}>
-                  {ex.muscleGroup}
+                  {ex.muscleGroup} · {ex.exerciseType === 'isolation' ? 'Isolation' : 'Compound'}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -371,6 +381,18 @@ export default function WorkoutActive({
                     );
                   })}
                 </div>
+
+                {/* Every session you have ever logged for this lift, as ticks.
+                    The green one is where the record was set. */}
+                {accretion.points.length >= 2 && (
+                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                    <AccretionStrip
+                      points={accretion.points}
+                      height={22}
+                      label={`${accretion.total} session${accretion.total === 1 ? '' : 's'}`}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -642,8 +664,7 @@ export default function WorkoutActive({
 
       {/* Floating Rest Timer countdown panel */}
       {restEndTime && (timerSeconds > 0 || isFlashing) && (
-        <div 
-          className={isFlashing ? 'rest-timer-flashing' : ''}
+        <div
           style={{
             position: 'fixed',
             bottom: '75px',
@@ -656,45 +677,61 @@ export default function WorkoutActive({
             borderWidth: '1px',
             borderStyle: 'solid',
             borderRadius: 'var(--radius-md)',
-            padding: '10px 14px',
-            boxShadow: 'var(--shadow-lg)',
+            padding: '12px 14px',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            gap: '10px',
             zIndex: 999
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Clock size={20} style={{
-              color: isFlashing ? 'var(--warning-strong)' : 'var(--accent)',
-              animation: timerSeconds > 0 ? 'spin 10s linear infinite' : 'none'
-            }} />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span className="text-xs text-bold" style={{ color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)' }}>
-                {isFlashing ? 'REST COMPLETE!' : 'RESTING'}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
+              <span className="text-xs text-bold" style={{
+                color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)',
+                whiteSpace: 'nowrap'
+              }}>
+                {isFlashing ? 'REST COMPLETE' : 'RESTING'}
               </span>
-              <span style={{ fontSize: '18px', fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                {isFlashing ? '00:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
+              <span className="magnitude" style={{ fontSize: '26px' }}>
+                {isFlashing ? '0:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
               </span>
             </div>
+            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => extendRestTimer(30)}
+                style={{ padding: '6px 10px', fontSize: '12px' }}
+              >
+                +30s
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={clearRestTimer}
+                style={{ padding: '6px 10px', fontSize: '12px' }}
+              >
+                Skip
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button 
-              type="button"
-              className="btn btn-secondary btn-sm" 
-              onClick={() => extendRestTimer(30)}
-              style={{ padding: '6px 10px', fontSize: '12px' }}
-            >
-              +30s
-            </button>
-            <button 
-              type="button"
-              className="btn btn-danger btn-sm" 
-              onClick={clearRestTimer}
-              style={{ padding: '6px 10px', fontSize: '12px' }}
-            >
-              Skip
-            </button>
+
+          {/* The rule. It shortens; nothing rotates and nothing pulses. When the
+              interval is over it fills out in fox rather than vanishing. */}
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round((isFlashing ? 1 : restRemaining) * 100)}
+            aria-label="Rest remaining"
+            style={{ height: '2px', backgroundColor: 'var(--bg-secondary)', overflow: 'hidden' }}
+          >
+            <div style={{
+              height: '100%',
+              width: `${(isFlashing ? 1 : restRemaining) * 100}%`,
+              backgroundColor: isFlashing ? 'var(--warning)' : 'var(--text-primary)',
+              transition: 'width 0.5s linear'
+            }} />
           </div>
         </div>
       )}
@@ -721,21 +758,6 @@ export default function WorkoutActive({
           </div>
         </div>
       )}
-
-      {/* Embedded PWA style animation rules */}
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .rest-timer-flashing {
-          animation: borderFlash 1s infinite alternate;
-        }
-        @keyframes borderFlash {
-          from { border-color: rgba(245, 158, 11, 0.3); box-shadow: 0 0 4px rgba(245, 158, 11, 0.2); }
-          to { border-color: rgba(245, 158, 11, 1); box-shadow: 0 0 12px rgba(245, 158, 11, 0.6); }
-        }
-      `}</style>
     </div>
   );
 }

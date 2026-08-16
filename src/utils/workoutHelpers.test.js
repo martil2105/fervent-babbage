@@ -20,6 +20,8 @@ import {
   getRoutineLastTrained,
   getDaysSinceRoutine,
   getAllTimeBest,
+  getAccretionSeries,
+  ACCRETION_WINDOW,
   isBestStale,
   STALE_BEST_DAYS,
   getReferenceExerciseData,
@@ -538,5 +540,66 @@ describe('getDaysSinceRoutine', () => {
   });
   it('returns null when the routine has never been trained', () => {
     expect(getDaysSinceRoutine([], 'routine-legs', now)).toBeNull();
+  });
+});
+
+describe('getAccretionSeries', () => {
+  // One session per entry; the number is the top working weight that day.
+  const day = (d, weight, extra = []) => ({
+    id: d,
+    timestamp: D(`2026-06-${String(d).padStart(2, '0')}`),
+    exercises: [{ exerciseId: 'press', sets: [warmup(10, 10), set(weight, 10), ...extra] }],
+  });
+
+  it('returns one point per session, oldest first, normalised across the window', () => {
+    const r = getAccretionSeries('press', [day(1, 20), day(8, 22.5), day(15, 25)]);
+    expect(r.points.map((p) => p.weight)).toEqual([20, 22.5, 25]);
+    expect(r.total).toBe(3);
+    expect(r.record).toBe(25);
+    expect(r.points[0].level).toBeCloseTo(0.32); // floor: the lightest still draws
+    expect(r.points[2].level).toBeCloseTo(1);
+  });
+
+  it('marks the session where the record was FIRST reached, not the latest tie', () => {
+    const r = getAccretionSeries('press', [day(1, 30), day(8, 25), day(15, 30)]);
+    expect(r.points.filter((p) => p.isRecord)).toHaveLength(1);
+    expect(r.points[0].isRecord).toBe(true);
+    expect(r.points[2].isRecord).toBe(false);
+  });
+
+  it('caps the window but keeps the all-time record, unmarked when it predates it', () => {
+    // 20 sessions; the heaviest is the very first, well outside a 12-wide window.
+    const sessions = Array.from({ length: 20 }, (_, i) => day(i + 1, i === 0 ? 200 : 20 + i));
+    const r = getAccretionSeries('press', sessions);
+    expect(r.points).toHaveLength(ACCRETION_WINDOW);
+    expect(r.total).toBe(20);
+    expect(r.record).toBe(200);
+    expect(r.points.some((p) => p.isRecord)).toBe(false);
+  });
+
+  it('sits a plateau at mid height so it cannot read as a run of records', () => {
+    const r = getAccretionSeries('press', [day(1, 40), day(8, 40), day(15, 40)]);
+    expect(r.points.every((p) => p.level === 0.6)).toBe(true);
+  });
+
+  it('ignores warmups and uncompleted sets, and survives empty input', () => {
+    const warmOnly = {
+      id: 'w', timestamp: D('2026-06-01'),
+      exercises: [{ exerciseId: 'press', sets: [warmup(10, 10)] }],
+    };
+    expect(getAccretionSeries('press', [warmOnly]).points).toEqual([]);
+    expect(getAccretionSeries('press', [warmOnly]).record).toBeNull();
+
+    const skipped = {
+      id: 's', timestamp: D('2026-06-08'),
+      exercises: [{ exerciseId: 'press', sets: [set(99, 5, { completed: false })] }],
+    };
+    const r = getAccretionSeries('press', [day(1, 20), skipped]);
+    expect(r.record).toBe(20);
+    expect(r.points).toHaveLength(1);
+
+    expect(getAccretionSeries('nope', [day(1, 20)]).points).toEqual([]);
+    expect(getAccretionSeries('press', []).total).toBe(0);
+    expect(getAccretionSeries('press', null).points).toEqual([]);
   });
 });

@@ -416,6 +416,52 @@ export const getExerciseProgression = (exerciseId, sessions) => {
 };
 
 /**
+ * How many sessions an accretion strip shows. Twelve is roughly a training
+ * block — long enough for a trend, short enough that each tick is legible.
+ */
+export const ACCRETION_WINDOW = 12;
+
+/**
+ * Accretion strip data: one tick per session that contained this exercise,
+ * oldest first, capped to the most recent `limit`.
+ *
+ * `level` (0–1) is min–maxed across the window, so a plateau reads flat and a
+ * climb reads as a climb. It never reaches 0 — the lightest session in the
+ * window still has to draw as a legible mark, not as dust. A window where every
+ * session used the same weight sits at mid height rather than maxed out, or a
+ * plateau would look like an unbroken run of records.
+ *
+ * `isRecord` marks the session where the heaviest weight was FIRST reached,
+ * measured across every session rather than just the window — a record set
+ * before the window simply doesn't light up, instead of crowning a lesser lift.
+ */
+export const getAccretionSeries = (exerciseId, sessions, limit = ACCRETION_WINDOW) => {
+  const all = getExerciseProgression(exerciseId, sessions);
+  if (all.length === 0) return { points: [], total: 0, record: null };
+
+  const record = all.reduce((m, p) => (p.topWeight > m ? p.topWeight : m), 0);
+  const firstRecordAt = record > 0
+    ? all.find((p) => p.topWeight === record).timestamp
+    : null;
+
+  const window = all.slice(-limit);
+  const weights = window.map((p) => p.topWeight);
+  const min = Math.min(...weights);
+  const span = Math.max(...weights) - min;
+
+  return {
+    points: window.map((p) => ({
+      timestamp: p.timestamp,
+      weight: p.topWeight,
+      level: span > 0 ? 0.32 + 0.68 * ((p.topWeight - min) / span) : 0.6,
+      isRecord: p.timestamp === firstRecordAt
+    })),
+    total: all.length,
+    record: record > 0 ? record : null
+  };
+};
+
+/**
  * Average RPE across a session's countable sets (RIR entries are converted).
  * Returns null when no set carries effort data, so callers can skip the point.
  */

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { TrendingUp, TrendingDown, Minus, Info, BarChart2, Zap, ShieldAlert, X } from 'lucide-react';
 import {
@@ -7,13 +7,25 @@ import {
   getProgressionSuggestion,
   getMondayOfDate,
   getDisplayExercises,
+  getAccretionSeries,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
+import AccretionStrip from './AccretionStrip';
 import { isBackupDue, daysSinceBackup } from '../utils/autoBackup';
 
 export default function Dashboard({ history, exercises, lastBackupAt, exportData, hasBackupFolder }) {
   const [breakdownView, setBreakdownView] = useState('muscleGroups'); // 'muscleGroups' | 'exercises'
   const [backupDismissed, setBackupDismissed] = useState(false);
+
+  // One walk of history per exercise, not one per render — the breakdown
+  // toggles views often and each series re-sorts every session.
+  const accretionByExercise = useMemo(() => {
+    const map = {};
+    getDisplayExercises(exercises, history).forEach((ex) => {
+      map[ex.id] = getAccretionSeries(ex.id, history);
+    });
+    return map;
+  }, [exercises, history]);
 
   // Stable clock read — react-compiler rejects Date.now() during render.
   const [nowTs] = useState(() => Date.now());
@@ -292,12 +304,15 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
               // Hide history-only exercises with no activity this week to avoid clutter
               if (ex.isHistorical && sets === 0 && vol === 0) return null;
               return (
-                <div key={ex.id} className="weekly-breakdown-row">
-                  <div className="weekly-breakdown-info">
-                    <span className="weekly-breakdown-name">{ex.name}</span>
-                    <span className="weekly-breakdown-sets">{sets} hard set{sets !== 1 ? 's' : ''} logged</span>
+                <div key={ex.id} className="weekly-breakdown-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="weekly-breakdown-info">
+                      <span className="weekly-breakdown-name">{ex.name}</span>
+                      <span className="weekly-breakdown-sets">{sets} hard set{sets !== 1 ? 's' : ''} logged</span>
+                    </div>
+                    <span className="weekly-breakdown-vol">{Math.round(vol)} kg</span>
                   </div>
-                  <span className="weekly-breakdown-vol">{Math.round(vol)} kg</span>
+                  <AccretionStrip points={accretionByExercise[ex.id]?.points} height={18} />
                 </div>
               );
             })}

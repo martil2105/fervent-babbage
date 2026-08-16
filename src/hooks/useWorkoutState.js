@@ -117,6 +117,14 @@ export const useWorkoutState = () => {
     return saved ? parseInt(saved) : null;
   });
 
+  // How long the current rest interval is, so the UI can show elapsed as a
+  // proportion rather than a bare countdown. Persisted alongside the end time —
+  // without it a reload mid-rest would have no denominator.
+  const [restTotalMs, setRestTotalMs] = useState(() => {
+    const saved = localStorage.getItem('hypertrophy_rest_total_ms');
+    return saved ? parseInt(saved) : 0;
+  });
+
   // Durable-storage status: null = unknown/not yet checked, true = persisted,
   // false = best-effort (browser may evict under disk pressure).
   const [storagePersisted, setStoragePersisted] = useState(null);
@@ -137,6 +145,14 @@ export const useWorkoutState = () => {
       localStorage.removeItem('hypertrophy_rest_end_time');
     }
   }, [restEndTime]);
+
+  useEffect(() => {
+    if (restTotalMs) {
+      localStorage.setItem('hypertrophy_rest_total_ms', restTotalMs.toString());
+    } else {
+      localStorage.removeItem('hypertrophy_rest_total_ms');
+    }
+  }, [restTotalMs]);
 
   // Ask the browser to keep our IndexedDB data durable (exempt from automatic
   // eviction). Runs once on load; the result is surfaced in Settings.
@@ -308,6 +324,7 @@ export const useWorkoutState = () => {
   // Rest Timer controls
   const startRestTimer = (seconds) => {
     setRestEndTime(Date.now() + seconds * 1000);
+    setRestTotalMs(seconds * 1000);
   };
 
   const extendRestTimer = (seconds) => {
@@ -315,10 +332,14 @@ export const useWorkoutState = () => {
       const base = prev && prev > Date.now() ? prev : Date.now();
       return base + seconds * 1000;
     });
+    // Extending lengthens the interval, so the rule refills rather than
+    // overflowing past full.
+    setRestTotalMs((prev) => prev + seconds * 1000);
   };
 
   const clearRestTimer = () => {
     setRestEndTime(null);
+    setRestTotalMs(0);
   };
 
   // Helper: heaviest working weight from the most recent session containing
@@ -832,6 +853,7 @@ export const useWorkoutState = () => {
     });
     localStorage.removeItem('hypertrophy_current_workout');
     localStorage.removeItem('hypertrophy_rest_end_time');
+    localStorage.removeItem('hypertrophy_rest_total_ms');
     setCurrentWorkout(null);
     clearRestTimer();
   };
@@ -843,6 +865,7 @@ export const useWorkoutState = () => {
     currentWorkout,
     preferences,
     restEndTime,
+    restTotalMs,
     updatePreference,
     startRestTimer,
     extendRestTimer,

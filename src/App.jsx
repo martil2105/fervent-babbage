@@ -41,6 +41,7 @@ export default function App() {
             history={workoutState.history}
             preferences={workoutState.preferences}
             restEndTime={workoutState.restEndTime}
+            restTotalMs={workoutState.restTotalMs}
             extendRestTimer={workoutState.extendRestTimer}
             clearRestTimer={workoutState.clearRestTimer}
           />
