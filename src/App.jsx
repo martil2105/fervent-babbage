@@ -7,6 +7,7 @@ import WorkoutActive from './components/WorkoutActive';
 import History from './components/History';
 import Settings from './components/Settings';
 import Analytics from './components/Analytics';
+import ExerciseDetail from './components/ExerciseDetail';
 
 // iOS routinely kills a backgrounded home-screen app — between sets, while you
 // were in your music app. Reopening should land back in the workout, not on
@@ -87,6 +88,10 @@ export default function App() {
 
   const { currentWorkout } = workoutState;
 
+  // The exercise page opens over whatever tab you're on — from the workout,
+  // History or Settings — and closing it puts you back where you were.
+  const [openExerciseId, setOpenExerciseId] = useState(null);
+
   // Every tab shares one scrolling <main>, so without this a tab opened
   // halfway down wherever the previous one was left.
   const contentRef = useRef(null);
@@ -114,7 +119,13 @@ export default function App() {
             updateSet={workoutState.updateSet}
             addSetToActive={workoutState.addSetToActive}
             removeSetFromActive={workoutState.removeSetFromActive}
-            addCustomExerciseToActive={workoutState.addCustomExerciseToActive}
+            addExerciseToActive={workoutState.addExerciseToActive}
+            moveActiveExercise={workoutState.moveActiveExercise}
+            removeActiveExercise={workoutState.removeActiveExercise}
+            startEmptyWorkout={workoutState.startEmptyWorkout}
+            createExercise={workoutState.createExercise}
+            catalog={workoutState.catalog}
+            onOpenExercise={setOpenExerciseId}
             routines={workoutState.routines}
             history={workoutState.history}
             preferences={workoutState.preferences}
@@ -140,6 +151,9 @@ export default function App() {
             routines={workoutState.routines}
             updateHistorySession={workoutState.updateHistorySession}
             deleteHistorySession={workoutState.deleteHistorySession}
+            catalog={workoutState.catalog}
+            createExercise={workoutState.createExercise}
+            onOpenExercise={setOpenExerciseId}
           />
         );
       case 'settings':
@@ -157,6 +171,11 @@ export default function App() {
             renameRoutine={workoutState.renameRoutine}
             deleteRoutine={workoutState.deleteRoutine}
             setExerciseInRoutine={workoutState.setExerciseInRoutine}
+            moveExerciseInRoutine={workoutState.moveExerciseInRoutine}
+            catalog={workoutState.catalog}
+            ensureInLibrary={workoutState.ensureInLibrary}
+            mergeExercises={workoutState.mergeExercises}
+            onOpenExercise={setOpenExerciseId}
             chooseBackupFolder={workoutState.chooseBackupFolder}
             forgetBackupFolder={workoutState.forgetBackupFolder}
             backupFolderName={workoutState.backupFolderName}
@@ -202,6 +221,18 @@ export default function App() {
       <main className="app-content" ref={contentRef}>
         {renderTabContent()}
       </main>
+
+      {openExerciseId && (
+        <ExerciseDetail
+          exerciseId={openExerciseId}
+          catalog={workoutState.catalog}
+          routines={workoutState.routines}
+          history={workoutState.history}
+          onClose={() => setOpenExerciseId(null)}
+          onMerge={workoutState.mergeExercises}
+          onOpenExercise={setOpenExerciseId}
+        />
+      )}
 
       {/* Bottom Tab Navigation */}
       <nav className="app-navigation">

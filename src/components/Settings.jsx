@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle, ArrowUpDown, GitMerge } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
+import ReorderSheet from './ReorderSheet';
+import { findMatchingExercise, findDuplicateExerciseGroups } from '../utils/exerciseLibrary';
 import {
   SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS,
   formatWeight,
@@ -37,7 +39,12 @@ export default function Settings({
   requestPersistentStorage,
   chooseBackupFolder,
   forgetBackupFolder,
-  backupFolderName
+  backupFolderName,
+  catalog = [],
+  ensureInLibrary,
+  mergeExercises,
+  moveExerciseInRoutine,
+  onOpenExercise
 }) {
   const [editingId, setEditingId] = useState(null);
   
@@ -66,6 +73,9 @@ export default function Settings({
   const [showAddNew, setShowAddNew] = useState(false);
 
   // Routine management
+  const [reorderRoutineId, setReorderRoutineId] = useState(null);
+  const [pendingMerge, setPendingMerge] = useState(null); // a duplicate group
+  const [merging, setMerging] = useState(false);
   const [renamingRoutineId, setRenamingRoutineId] = useState(null);
   const [routineDraftName, setRoutineDraftName] = useState('');
   const [newRoutineName, setNewRoutineName] = useState('');
@@ -169,9 +179,21 @@ export default function Settings({
     setEditingId(null);
   };
 
-  const handleCreateExercise = (e) => {
+  // A name the app already knows (under any spelling) adds that exercise to
+  // the chosen session instead of creating a second copy of it.
+  const newNameMatch = findMatchingExercise(newName, catalog);
+
+  const handleCreateExercise = async (e) => {
     e.preventDefault();
     if (!newName.trim()) return;
+    const targetRoutineId = newRoutineId || routines[0]?.id;
+    if (newNameMatch.exact) {
+      const record = await ensureInLibrary?.(newNameMatch.exact);
+      if (record && targetRoutineId) await setExerciseInRoutine(targetRoutineId, record.id, true);
+      setNewName('');
+      setShowAddNew(false);
+      return;
+    }
     addExerciseToConfig(
       newName,
       newSets,
@@ -250,6 +272,22 @@ export default function Settings({
     else deleteRoutine(pendingDelete.id);
     setPendingDelete(null);
   };
+
+  const duplicateGroups = findDuplicateExerciseGroups(catalog);
+
+  const confirmMerge = async () => {
+    if (!pendingMerge) return;
+    setMerging(true);
+    try {
+      await mergeExercises?.(pendingMerge.others.map((e) => e.id), pendingMerge.target);
+      setPendingMerge(null);
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const reorderRoutine = routines.find((r) => r.id === reorderRoutineId);
+  const catalogById = new Map(catalog.map((e) => [e.id, e]));
 
   const importSummary = pendingImport?.summary;
   const currentSpan = summarizeSessions(history);
@@ -388,6 +426,16 @@ export default function Settings({
                     </div>
                     <button
                       className="btn btn-secondary btn-icon-only btn-sm"
+                      onClick={() => setReorderRoutineId(routine.id)}
+                      disabled={count === 0}
+                      style={{ border: 'none', background: 'none', opacity: count === 0 ? 0.35 : 1 }}
+                      aria-label={`Change the order of ${routine.name}`}
+                      title="Exercise order"
+                    >
+                      <ArrowUpDown size={14} style={{ color: 'var(--text-secondary)' }} />
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-icon-only btn-sm"
                       onClick={() => {
                         setRenamingRoutineId(routine.id);
                         setRoutineDraftName(routine.name);
@@ -437,6 +485,36 @@ export default function Settings({
         </form>
       </div>
 
+      {/* Duplicates: the same lift logged under different spellings */}
+      {duplicateGroups.length > 0 && (
+        <div className="card" style={{ borderColor: 'var(--fox-200)' }}>
+          <h3 className="card-title" style={{ justifyContent: 'flex-start', gap: '8px' }}>
+            <GitMerge size={17} style={{ color: 'var(--warning-strong)' }} /> Possible duplicates
+          </h3>
+          <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
+            These look like one exercise under different names, so their history is
+            split. Merging moves it all onto one name.
+          </p>
+          {duplicateGroups.map((group) => (
+            <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
+              {[group.target, ...group.others].map((e, i) => (
+                <div key={e.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  <button type="button" className="link-btn text-bold" style={{ fontSize: '14px' }} onClick={() => onOpenExercise?.(e.id)}>
+                    {e.name}
+                  </button>
+                  <span className="text-xs text-muted">
+                    {e.sessionCount} session{e.sessionCount === 1 ? '' : 's'}{i === 0 ? ' · keep' : ''}
+                  </span>
+                </div>
+              ))}
+              <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => setPendingMerge(group)}>
+                <GitMerge size={14} /> Merge into {group.target.name}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 3. Exercises Configuration */}
       <div className="card">
         <div className="card-title">
@@ -469,6 +547,16 @@ export default function Settings({
                 onChange={(e) => setNewName(e.target.value)} 
                 required 
               />
+              {newNameMatch.exact ? (
+                <span className="text-xs" style={{ color: 'var(--warning-strong)' }}>
+                  You already have “{newNameMatch.exact.name}” — saving adds that one to the
+                  session instead of creating a copy.
+                </span>
+              ) : newNameMatch.similar.length > 0 ? (
+                <span className="text-xs text-muted">
+                  Similar: {newNameMatch.similar.map((e) => `“${e.name}”`).join(', ')}
+                </span>
+              ) : null}
             </div>
             
             {routines.length > 0 && (
@@ -759,7 +847,9 @@ export default function Settings({
               <div key={ex.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-secondary)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="text-bold" style={{ fontSize: '14px' }}>{ex.name}</span>
+                    <button type="button" className="link-btn text-bold" style={{ fontSize: '14px' }} onClick={() => onOpenExercise?.(ex.id)}>
+                      {ex.name}
+                    </button>
                     <span className="text-xs" style={{ 
                       backgroundColor: 'var(--bg-card)', 
                       padding: '1px 6px', 
@@ -772,15 +862,8 @@ export default function Settings({
                       {ex.muscleGroup || 'Other'}
                     </span>
                     {!routinesByExerciseId[ex.id] && (
-                      <span className="text-xs" style={{
-                        backgroundColor: 'var(--warning-glow)',
-                        padding: '1px 6px',
-                        borderRadius: '8px',
-                        color: 'var(--warning-strong)',
-                        fontSize: '9px',
-                        fontWeight: 600
-                      }}>
-                        In no session
+                      <span className="text-xs text-muted" style={{ fontSize: '10px' }}>
+                        Not in a session
                       </span>
                     )}
                   </div>
@@ -1042,6 +1125,38 @@ export default function Settings({
           <p style={{ margin: 0 }}>
             Everything on this device is replaced by the backup.
           </p>
+        </ConfirmDialog>
+      )}
+
+      {reorderRoutine && (
+        <ReorderSheet
+          title={`${reorderRoutine.name} order`}
+          subtitle="The order this session starts in. You can still reorder inside a workout — that only changes that workout."
+          items={(reorderRoutine.exerciseIds || []).map((id) => ({
+            id,
+            name: catalogById.get(id)?.name || 'Unknown exercise',
+            meta: catalogById.get(id)?.muscleGroup
+          }))}
+          onMove={(id, delta) => moveExerciseInRoutine?.(reorderRoutine.id, id, delta)}
+          onRemove={(id) => setExerciseInRoutine(reorderRoutine.id, id, false)}
+          removeLabel="Remove from session"
+          onClose={() => setReorderRoutineId(null)}
+        />
+      )}
+
+      {pendingMerge && (
+        <ConfirmDialog
+          title={`Merge into ${pendingMerge.target.name}?`}
+          confirmLabel="Merge"
+          busy={merging}
+          onCancel={() => setPendingMerge(null)}
+          onConfirm={confirmMerge}
+        >
+          {pendingMerge.others.map((e) => `“${e.name}”`).join(', ')}{' '}
+          ({pendingMerge.others.reduce((n, e) => n + e.sessionCount, 0)} session
+          {pendingMerge.others.reduce((n, e) => n + e.sessionCount, 0) === 1 ? '' : 's'}) will be
+          logged as “{pendingMerge.target.name}” from now on. This rewrites history and can&apos;t
+          be undone — export a backup first if you&apos;re unsure.
         </ConfirmDialog>
       )}
 

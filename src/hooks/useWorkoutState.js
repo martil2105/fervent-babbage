@@ -1,13 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, LEG_EXERCISES, PUSH_ROUTINE_ID, LEGS_ROUTINE_ID } from '../db/workoutDb';
 import { ensurePersistentStorage } from '../utils/storagePersistence';
 import {
-  getAllTimeBest,
   getLastSessionSets,
-  isBestStale,
-  roundWeight
+  roundWeight,
+  buildWorkoutExercise,
+  defaultWeightStep
 } from '../utils/workoutHelpers';
+import {
+  buildExerciseCatalog,
+  findMatchingExercise,
+  planExerciseMerge,
+  tidyExerciseName
+} from '../utils/exerciseLibrary';
 import { retagLegsExercise } from '../db/legsMigration';
 import { parseBackup, saveBackupFile, backupFileName } from '../utils/backupFile';
 import {
@@ -114,20 +120,58 @@ const DEFAULT_ROUTINES = [
   }
 ];
 
-// Default whole-kg weight increment for an exercise: compounds jump in 2 kg,
-// isolations in 1 kg. Used when an exercise has no explicit weightStep yet.
-export const defaultWeightStep = (exerciseType) =>
-  exerciseType === 'isolation' ? 1 : 2;
+// Re-exported for anything that imported it from here before it moved to
+// workoutHelpers alongside buildWorkoutExercise.
+export { defaultWeightStep };
+
+const newId = (prefix) =>
+  `${prefix}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`;
+
+// Library record for a brand-new exercise. Rep range and sets are sensible
+// starting points; everything is editable in Settings.
+const newLibraryExercise = ({ name, muscleGroup = 'Other', exerciseType = 'compound' }) => ({
+  id: newId('ex'),
+  name: tidyExerciseName(name),
+  targetSets: 3,
+  minReps: 8,
+  maxReps: 12,
+  isCustom: true,
+  muscleGroup,
+  exerciseType,
+  restDuration: exerciseType === 'isolation' ? 90 : 120,
+  weightStep: defaultWeightStep(exerciseType),
+  startingWeight: null
+});
+
+// The library fields of a catalog entry (drops the derived bookkeeping).
+const toLibraryRecord = (entry) => ({
+  id: entry.id,
+  name: entry.name,
+  targetSets: entry.targetSets || 3,
+  minReps: entry.minReps ?? 8,
+  maxReps: entry.maxReps ?? 12,
+  isCustom: true,
+  muscleGroup: entry.muscleGroup || 'Other',
+  exerciseType: entry.exerciseType || 'compound',
+  restDuration: entry.restDuration || (entry.exerciseType === 'isolation' ? 90 : 120),
+  weightStep: entry.weightStep || defaultWeightStep(entry.exerciseType),
+  startingWeight: entry.startingWeight ?? null
+});
 
 export const useWorkoutState = () => {
-  // 1. Reactive Queries from IndexedDB using Dexie
-  const exercises = useLiveQuery(() => db.exercises.toArray()) || [];
-  
+  // 1. Reactive Queries from IndexedDB using Dexie. The raw results are
+  // undefined until the first read resolves; the `|| []` copies below are for
+  // consumers, while memos key off the raw (stable) results.
+  const exercisesQuery = useLiveQuery(() => db.exercises.toArray());
+  const exercises = exercisesQuery || [];
+
   // Sort history newest to oldest for easy listing
-  const history = useLiveQuery(() => db.history.orderBy('timestamp').reverse().toArray()) || [];
+  const historyQuery = useLiveQuery(() => db.history.orderBy('timestamp').reverse().toArray());
+  const history = historyQuery || [];
 
   // Routines in display order (Push, Legs, ...)
-  const routines = useLiveQuery(() => db.routines.orderBy('order').toArray()) || [];
+  const routinesQuery = useLiveQuery(() => db.routines.orderBy('order').toArray());
+  const routines = routinesQuery || [];
 
   const preferencesObj = useLiveQuery(async () => {
     const arr = await db.preferences.toArray();
@@ -139,6 +183,14 @@ export const useWorkoutState = () => {
   });
   
   const preferences = preferencesObj || { prefLoggingMode: 'RPE' };
+
+  // Every exercise the app knows — library plus ones that only exist in
+  // history — with usage counts and name keys. Feeds the exercise picker,
+  // duplicate detection and the exercise page.
+  const catalog = useMemo(
+    () => buildExerciseCatalog(exercisesQuery || [], routinesQuery || [], historyQuery || []),
+    [exercisesQuery, routinesQuery, historyQuery]
+  );
 
   // 2. LocalStorage for transient/active session data (Refreshes safe)
   const [currentWorkout, setCurrentWorkout] = useState(() => {
@@ -386,12 +438,6 @@ export const useWorkoutState = () => {
     return last ? Math.max(...last.sets.map((s) => s.weight)) : null;
   };
 
-  // Helper: reps of each set that was done last time, in order
-  const getLastLoggedReps = (exerciseId) => {
-    const last = getLastSessionSets(exerciseId, history);
-    return last ? last.sets.map((s) => s.reps) : null;
-  };
-
   // Start a new workout session for a routine.
   //
   // The routine's exerciseIds decide both *which* exercises appear and in what
@@ -409,56 +455,11 @@ export const useWorkoutState = () => {
 
     if (sourceExercises.length === 0) return;
 
-    // Prefill anchors on the heaviest weight ever completed, not the last
-    // session — so one bad day doesn't reset the target. The staleness guard
-    // stops that becoming a trap: a best older than STALE_BEST_DAYS means the
-    // strength is likely gone, so we fall back to what was actually lifted
-    // most recently. Date.now() is safe here (event handler, not render).
+    // Prefill anchors on the heaviest weight ever completed, with a fallback
+    // to the last session actually done when that best has gone stale — see
+    // buildWorkoutExercise. Date.now() is safe here (event handler, not render).
     const startedAt = Date.now();
-
-    const workoutExercises = sourceExercises.map((ex) => {
-      const best = getAllTimeBest(ex.id, history);
-      const useBest = best !== null && !isBestStale(best, startedAt);
-
-      const loggedWeight = useBest ? best.weight : getLastLoggedWeight(ex.id);
-      const lastRepsList = useBest ? best.reps : getLastLoggedReps(ex.id);
-
-      // With no history at all, fall back to the exercise's configured starting
-      // weight — and if that isn't set either, leave the field blank. Inventing
-      // a number here (it used to hard-code 10 kg) is worse than asking: on a
-      // leg press the empty sled alone can outweigh the guess.
-      const lastWeight = loggedWeight !== null
-        ? loggedWeight
-        : (typeof ex.startingWeight === 'number' && ex.startingWeight > 0
-            ? ex.startingWeight
-            : '');
-
-      const sets = [];
-      const numSets = ex.targetSets || 4;
-      for (let i = 0; i < numSets; i++) {
-        const prevRep = lastRepsList && lastRepsList[i] !== undefined ? lastRepsList[i] : ex.minReps;
-        sets.push({
-          weight: lastWeight,
-          reps: prevRep,
-          completed: false,
-          isWarmup: false,
-          rpe: '',
-          rir: '',
-          completedAt: null
-        });
-      }
-
-      return {
-        exerciseId: ex.id,
-        name: ex.name,
-        sets,
-        targetRange: { min: ex.minReps, max: ex.maxReps },
-        muscleGroup: ex.muscleGroup || 'Other',
-        exerciseType: ex.exerciseType || 'compound',
-        restDuration: ex.restDuration || 120,
-        weightStep: ex.weightStep || defaultWeightStep(ex.exerciseType)
-      };
-    });
+    const workoutExercises = sourceExercises.map((ex) => buildWorkoutExercise(ex, history, startedAt));
 
     setCurrentWorkout({
       id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
@@ -471,10 +472,85 @@ export const useWorkoutState = () => {
     });
   };
 
+  // Start with no exercises and add them from the list as you go.
+  const startEmptyWorkout = () => {
+    setCurrentWorkout({
+      id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+      startTime: Date.now(),
+      routineId: null,
+      routineName: null,
+      exercises: []
+    });
+  };
+
   // Cancel current workout
   const cancelWorkout = () => {
     setCurrentWorkout(null);
     clearRestTimer();
+  };
+
+  // --- Exercise library -----------------------------------------------------
+
+  // Make sure an exercise has a library record, so every future use shares its
+  // id (and therefore its history). Exercises that only exist in history —
+  // added on the fly before, or deleted from the library — are adopted under
+  // their existing id, which reconnects them to what was logged.
+  const ensureInLibrary = async (entry) => {
+    if (!entry?.id) return null;
+    const existing = await db.exercises.get(entry.id);
+    if (existing) return existing;
+    const record = toLibraryRecord(entry);
+    await db.exercises.put(record);
+    return record;
+  };
+
+  // Create a new library exercise — unless the name is one the app already
+  // knows under another spelling, in which case that exercise is returned
+  // (and adopted into the library if it only lived in history). The pickers
+  // check first too; this is the last line against duplicates.
+  const createExercise = async ({ name, muscleGroup, exerciseType }) => {
+    const clean = tidyExerciseName(name);
+    if (!clean) return null;
+    const { exact } = findMatchingExercise(clean, catalog);
+    if (exact) return ensureInLibrary(exact);
+    const record = newLibraryExercise({ name: clean, muscleGroup, exerciseType });
+    await db.exercises.add(record);
+    return record;
+  };
+
+  // --- Changing today's workout (never the saved session) -------------------
+
+  // Add an exercise to the running workout, prefilled from its history the
+  // same way a session prefills. Already in today's workout: no-op.
+  const addExerciseToActive = async (entry) => {
+    if (!currentWorkout || !entry?.id) return;
+    if (currentWorkout.exercises.some((ex) => ex.exerciseId === entry.id)) return;
+    const def = (await ensureInLibrary(entry)) || entry;
+    const built = buildWorkoutExercise(def, history, Date.now());
+    setCurrentWorkout((prev) => (
+      !prev || prev.exercises.some((ex) => ex.exerciseId === built.exerciseId)
+        ? prev
+        : { ...prev, exercises: [...prev.exercises, built] }
+    ));
+  };
+
+  const moveActiveExercise = (exerciseId, delta) => {
+    setCurrentWorkout((prev) => {
+      if (!prev) return prev;
+      const from = prev.exercises.findIndex((ex) => ex.exerciseId === exerciseId);
+      const to = from + delta;
+      if (from === -1 || to < 0 || to >= prev.exercises.length) return prev;
+      const next = [...prev.exercises];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return { ...prev, exercises: next };
+    });
+  };
+
+  const removeActiveExercise = (exerciseId) => {
+    setCurrentWorkout((prev) => (
+      prev ? { ...prev, exercises: prev.exercises.filter((ex) => ex.exerciseId !== exerciseId) } : prev
+    ));
   };
 
   // Complete current workout. Returns the saved session, or null when there
@@ -682,32 +758,6 @@ export const useWorkoutState = () => {
     });
   };
 
-  // Add a custom exercise to active workout on the fly
-  const addCustomExerciseToActive = (name, muscleGroup = 'Other') => {
-    if (!currentWorkout || !name.trim()) return;
-
-    const id = `custom-${Date.now()}`;
-    const newExercise = {
-      exerciseId: id,
-      name: name.trim(),
-      // Blank weight rather than an invented 10 kg — same rule as the prefill
-      // for library exercises with no history.
-      sets: [
-        { weight: '', reps: 10, completed: false, isWarmup: false, rpe: '', rir: '', completedAt: null }
-      ],
-      targetRange: { min: 8, max: 12 },
-      muscleGroup,
-      exerciseType: 'compound',
-      restDuration: 120,
-      weightStep: defaultWeightStep('compound')
-    };
-
-    setCurrentWorkout((prev) => ({
-      ...prev,
-      exercises: [...prev.exercises, newExercise]
-    }));
-  };
-
   // Add a custom exercise to the global library and attach it to a routine.
   //
   // The routine attachment matters: an exercise that belongs to no routine can
@@ -802,6 +852,74 @@ export const useWorkoutState = () => {
         ? [...routine.exerciseIds, exerciseId]
         : routine.exerciseIds.filter((id) => id !== exerciseId)
     });
+  };
+
+  // Move an exercise within a saved session (Settings → Sessions → Order).
+  const moveExerciseInRoutine = async (routineId, exerciseId, delta) => {
+    const routine = routines.find((r) => r.id === routineId);
+    if (!routine) return;
+    const ids = [...routine.exerciseIds];
+    const from = ids.indexOf(exerciseId);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= ids.length) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, exerciseId);
+    await db.routines.update(routineId, { exerciseIds: ids });
+  };
+
+  // Merge exercises that are the same lift under different names into
+  // `target` (a catalog entry). History is rewritten — every session that
+  // logged a source now logs the target — in one transaction, so it either
+  // all happens or none of it does. See planExerciseMerge for the details.
+  const mergeExercises = async (sourceIds, target) => {
+    const sources = (sourceIds || []).filter((id) => id && id !== target?.id);
+    if (!target?.id || sources.length === 0) return false;
+
+    await db.transaction('rw', [db.history, db.exercises, db.routines], async () => {
+      let sessions = await db.history.toArray();
+      let library = await db.exercises.toArray();
+      let savedRoutines = await db.routines.toArray();
+
+      for (const sourceId of sources) {
+        const plan = planExerciseMerge({ sessions, library, routines: savedRoutines, sourceId, target });
+        if (!plan) continue;
+
+        for (const u of plan.sessionsToUpdate) {
+          await db.history.update(u.id, { exercises: u.exercises });
+        }
+        if (plan.exerciseIdsToDelete.length) await db.exercises.bulkDelete(plan.exerciseIdsToDelete);
+        if (plan.exercisesToPut.length) await db.exercises.bulkPut(plan.exercisesToPut);
+        if (plan.routinesToPut.length) await db.routines.bulkPut(plan.routinesToPut);
+
+        // Keep the working copies current for the next source in the batch.
+        const updated = new Map(plan.sessionsToUpdate.map((u) => [u.id, u.exercises]));
+        sessions = sessions.map((sess) => (updated.has(sess.id) ? { ...sess, exercises: updated.get(sess.id) } : sess));
+        library = library
+          .filter((ex) => !plan.exerciseIdsToDelete.includes(ex.id))
+          .concat(plan.exercisesToPut.filter((ex) => !library.some((l) => l.id === ex.id)));
+        const routinesById = new Map(plan.routinesToPut.map((r) => [r.id, r]));
+        savedRoutines = savedRoutines.map((r) => routinesById.get(r.id) || r);
+      }
+    });
+
+    // A workout in progress that includes a merged exercise follows it too.
+    setCurrentWorkout((prev) => {
+      if (!prev || !prev.exercises.some((ex) => sources.includes(ex.exerciseId))) return prev;
+      const hasTarget = prev.exercises.some((ex) => ex.exerciseId === target.id);
+      let placed = hasTarget;
+      return {
+        ...prev,
+        exercises: prev.exercises
+          .map((ex) => {
+            if (!sources.includes(ex.exerciseId)) return ex;
+            if (placed) return null; // target already here: drop the duplicate card
+            placed = true;
+            return { ...ex, exerciseId: target.id, name: target.name };
+          })
+          .filter(Boolean)
+      };
+    });
+    return true;
   };
 
   // Export data as JSON.
@@ -921,6 +1039,7 @@ export const useWorkoutState = () => {
     extendRestTimer,
     clearRestTimer,
     startWorkout,
+    startEmptyWorkout,
     cancelWorkout,
     completeWorkout,
     updateHistorySession,
@@ -928,7 +1047,14 @@ export const useWorkoutState = () => {
     updateSet,
     addSetToActive,
     removeSetFromActive,
-    addCustomExerciseToActive,
+    addExerciseToActive,
+    moveActiveExercise,
+    removeActiveExercise,
+    catalog,
+    createExercise,
+    ensureInLibrary,
+    mergeExercises,
+    moveExerciseInRoutine,
     addExerciseToConfig,
     updateExerciseInConfig,
     deleteExerciseFromConfig,

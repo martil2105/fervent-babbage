@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Play, Check, Trash2, Plus, X, Dumbbell, Ghost, TrendingUp, Trophy } from 'lucide-react';
+import { Play, Check, Trash2, Plus, Dumbbell, Ghost, TrendingUp, Trophy, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import AccretionStrip from './AccretionStrip';
 import ConfirmDialog from './ConfirmDialog';
 import WeightInput from './WeightInput';
+import ExercisePicker from './ExercisePicker';
+import ReorderSheet from './ReorderSheet';
 import {
   getProgressionSuggestion,
   getLastSessionSets,
@@ -14,7 +16,7 @@ import {
   getWorkoutCompletion,
   roundWeight,
   formatWeight,
-  SELECTABLE_MUSCLE_GROUPS
+  summarizeSets
 } from '../utils/workoutHelpers';
 
 // Format seconds to MM:SS (or H:MM:SS past the hour)
@@ -141,7 +143,13 @@ export default function WorkoutActive({
   updateSet,
   addSetToActive,
   removeSetFromActive,
-  addCustomExerciseToActive,
+  addExerciseToActive,
+  moveActiveExercise,
+  removeActiveExercise,
+  startEmptyWorkout,
+  createExercise,
+  catalog = [],
+  onOpenExercise,
   routines = [],
   history,
   preferences,
@@ -150,9 +158,12 @@ export default function WorkoutActive({
   extendRestTimer,
   clearRestTimer
 }) {
-  const [customExerciseName, setCustomExerciseName] = useState('');
-  const [customExerciseMG, setCustomExerciseMG] = useState('Shoulders');
-  const [showAddCustom, setShowAddCustom] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [showReorder, setShowReorder] = useState(false);
+  // Exercise whose removal (with ticked sets) is awaiting confirmation
+  const [pendingRemoval, setPendingRemoval] = useState(null);
+  // Finished exercises fold to one line; these are the ones opened back up.
+  const [openedDone, setOpenedDone] = useState(() => new Set());
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   // 'empty' | 'partial' while the finish dialog is open
   const [finishPrompt, setFinishPrompt] = useState(null);
@@ -264,6 +275,14 @@ export default function WorkoutActive({
               <Play size={18} fill="currentColor" /> Start Workout Session
             </button>
           )}
+
+          <button
+            className="btn btn-secondary"
+            onClick={startEmptyWorkout}
+            style={{ width: '100%', maxWidth: '340px', borderStyle: 'dashed', background: 'transparent' }}
+          >
+            <Plus size={16} /> Empty workout — pick exercises as you go
+          </button>
         </div>
       </div>
     );
@@ -322,12 +341,43 @@ export default function WorkoutActive({
 
   const completion = getWorkoutCompletion(currentWorkout);
 
-  const handleAddCustomExercise = (e) => {
-    e.preventDefault();
-    if (!customExerciseName.trim()) return;
-    addCustomExerciseToActive(customExerciseName, customExerciseMG);
-    setCustomExerciseName('');
-    setShowAddCustom(false);
+  // New exercises land at the end of the list; bring the card into view.
+  const revealExercise = (exerciseId) => {
+    requestAnimationFrame(() => {
+      document.getElementById(`exercise-${exerciseId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const handlePick = async (entry) => {
+    await addExerciseToActive(entry);
+    setShowPicker(false);
+    revealExercise(entry.id);
+  };
+
+  const handleCreate = async (fields) => {
+    const record = await createExercise(fields);
+    if (!record) return;
+    await addExerciseToActive(record);
+    setShowPicker(false);
+    revealExercise(record.id);
+  };
+
+  // Removing an exercise you haven't touched is instant; one with ticked sets
+  // asks first, since those sets go with it.
+  const requestRemove = (exerciseId) => {
+    const ex = currentWorkout.exercises.find((e) => e.exerciseId === exerciseId);
+    if (!ex) return;
+    if (ex.sets.some((s) => s.completed)) setPendingRemoval(ex);
+    else removeActiveExercise(exerciseId);
+  };
+
+  const toggleDone = (exerciseId, open) => {
+    setOpenedDone((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(exerciseId);
+      else next.delete(exerciseId);
+      return next;
+    });
   };
 
   const effortMode = preferences.prefLoggingMode === 'RIR' ? 'RIR' : 'RPE';
@@ -363,6 +413,36 @@ export default function WorkoutActive({
         </div>
       )}
 
+      {/* Progress, and reshaping today's workout. Changes here stay in this
+          workout; the saved session is edited in Settings. */}
+      <div className="workout-toolbar">
+        <span className="text-xs text-muted" style={{ flex: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {completion.total > 0
+            ? `${completion.logged} of ${completion.total} sets logged`
+            : 'No exercises yet'}
+        </span>
+        {currentWorkout.exercises.length > 1 && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowReorder(true)}>
+            <ArrowUpDown size={14} /> Reorder
+          </button>
+        )}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPicker(true)}>
+          <Plus size={14} /> Add
+        </button>
+      </div>
+
+      {currentWorkout.exercises.length === 0 && (
+        <div className="card" style={{ alignItems: 'center', textAlign: 'center', padding: '28px 16px' }}>
+          <Dumbbell size={28} style={{ color: 'var(--text-muted)' }} />
+          <p className="text-muted" style={{ margin: 0 }}>
+            Add exercises from your list as you go — each one remembers what you did last time.
+          </p>
+          <button type="button" className="btn btn-primary" onClick={() => setShowPicker(true)}>
+            <Plus size={16} /> Add exercise
+          </button>
+        </div>
+      )}
+
       {/* 2. Exercises Logging List */}
       {currentWorkout.exercises.map((ex) => {
         const { suggestion, last, best, accretion, belowBest } = insights[ex.exerciseId] || {};
@@ -377,11 +457,43 @@ export default function WorkoutActive({
         let workingCount = 0;
         const setLabels = ex.sets.map((s) => (s.isWarmup ? 'W' : String(++workingCount)));
 
+        // Every set ticked: fold to one line so the next exercise moves up.
+        const isDone = ex.sets.length > 0 && ex.sets.every((s) => s.completed);
+        if (isDone && !openedDone.has(ex.exerciseId)) {
+          return (
+            <button
+              key={ex.exerciseId}
+              id={`exercise-${ex.exerciseId}`}
+              type="button"
+              className="exercise-done"
+              onClick={() => toggleDone(ex.exerciseId, true)}
+              aria-expanded="false"
+              aria-label={`${ex.name}, done: ${summarizeSets(ex.sets)}. Show sets`}
+            >
+              <span className="exercise-done-check"><Check size={15} strokeWidth={3} /></span>
+              <span className="pick-row-main">
+                <span className="pick-row-name">{ex.name}</span>
+                <span className="pick-row-meta">{summarizeSets(ex.sets)}</span>
+              </span>
+              <ChevronDown size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+            </button>
+          );
+        }
+
         return (
-          <div key={ex.exerciseId} className="card">
+          <div key={ex.exerciseId} id={`exercise-${ex.exerciseId}`} className="card">
             <div className="exercise-log-header">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="card-title" style={{ fontSize: '16px' }}>{ex.name}</h3>
+                <h3 className="card-title" style={{ fontSize: '16px' }}>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => onOpenExercise?.(ex.exerciseId)}
+                    aria-label={`${ex.name} — show history`}
+                  >
+                    {ex.name}
+                  </button>
+                </h3>
                 {/* Exercise type used to be a 4px colour bar down the whole
                     card. It is one word — and a word costs no pigment. */}
                 <span className="text-xs text-bold text-muted" style={{
@@ -393,6 +505,17 @@ export default function WorkoutActive({
                 }}>
                   {ex.muscleGroup} · {ex.exerciseType === 'isolation' ? 'Isolation' : 'Compound'}
                 </span>
+                {isDone && (
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => toggleDone(ex.exerciseId, false)}
+                    aria-label={`Fold ${ex.name} away`}
+                    style={{ marginLeft: '6px', color: 'var(--text-muted)', display: 'flex' }}
+                  >
+                    <ChevronUp size={18} />
+                  </button>
+                )}
               </div>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span className="rep-target-badge">
@@ -643,64 +766,14 @@ export default function WorkoutActive({
         );
       })}
 
-      {/* 3. Add Custom Exercise Card */}
-      {showAddCustom ? (
-        <form onSubmit={handleAddCustomExercise} className="card" style={{ gap: '14px' }}>
-          <div className="card-title">
-            <span>Add Custom Exercise</span>
-            <button
-              type="button"
-              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-              onClick={() => setShowAddCustom(false)}
-              aria-label="Close"
-            >
-              <X size={18} />
-            </button>
-          </div>
-          <div className="form-group">
-            <label htmlFor="custom-exercise-name">Exercise Name</label>
-            <input
-              type="text"
-              id="custom-exercise-name"
-              className="form-input"
-              placeholder="e.g. Incline DB Flyes"
-              value={customExerciseName}
-              onChange={(e) => setCustomExerciseName(e.target.value)}
-              autoFocus
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="custom-exercise-mg">Muscle Group</label>
-            <select
-              id="custom-exercise-mg"
-              className="form-input"
-              value={customExerciseMG}
-              onChange={(e) => setCustomExerciseMG(e.target.value)}
-            >
-              {/* Shared list, so this picker can't drift from Settings again —
-                  it was the last place still offering the retired 'Legs'. */}
-              {SELECTABLE_MUSCLE_GROUPS.map((mg) => (
-                <option key={mg} value={mg}>{mg}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddCustom(false)}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary btn-sm">
-              Add to Workout
-            </button>
-          </div>
-        </form>
-      ) : (
+      {/* 3. Add an exercise from the list */}
+      {currentWorkout.exercises.length > 0 && (
         <button
           className="btn btn-secondary"
-          onClick={() => setShowAddCustom(true)}
+          onClick={() => setShowPicker(true)}
           style={{ borderStyle: 'dashed', background: 'transparent' }}
         >
-          <Plus size={16} /> Add Custom Exercise on the Fly
+          <Plus size={16} /> Add exercise
         </button>
       )}
 
@@ -744,6 +817,59 @@ export default function WorkoutActive({
         >
           None of the sets are ticked, so there&apos;s nothing to save. Tap ✓ on
           each set as you finish it — only ticked sets count toward your log.
+        </ConfirmDialog>
+      )}
+
+      {showPicker && (
+        <ExercisePicker
+          catalog={catalog}
+          routines={routines}
+          history={history}
+          excludeIds={currentWorkout.exercises.map((ex) => ex.exerciseId)}
+          onPick={handlePick}
+          onCreate={handleCreate}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
+
+      {showReorder && (
+        <ReorderSheet
+          title="Today's order"
+          subtitle="Only changes this workout — your saved session stays as it is."
+          items={currentWorkout.exercises.map((ex) => {
+            const ticked = ex.sets.filter((s) => s.completed).length;
+            return { id: ex.exerciseId, name: ex.name, meta: `${ticked} of ${ex.sets.length} sets logged` };
+          })}
+          onMove={moveActiveExercise}
+          onRemove={requestRemove}
+          onClose={() => setShowReorder(false)}
+          footer={(
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => { setShowReorder(false); setShowPicker(true); }}
+              style={{ borderStyle: 'dashed', background: 'transparent' }}
+            >
+              <Plus size={16} /> Add exercise
+            </button>
+          )}
+        />
+      )}
+
+      {pendingRemoval && (
+        <ConfirmDialog
+          title={`Remove ${pendingRemoval.name} from today?`}
+          confirmLabel="Remove"
+          cancelLabel="Keep it"
+          onCancel={() => setPendingRemoval(null)}
+          onConfirm={() => {
+            removeActiveExercise(pendingRemoval.exerciseId);
+            setPendingRemoval(null);
+          }}
+        >
+          Its {pendingRemoval.sets.filter((s) => s.completed).length} ticked set
+          {pendingRemoval.sets.filter((s) => s.completed).length === 1 ? '' : 's'} won&apos;t be saved.
+          Your saved session isn&apos;t changed.
         </ConfirmDialog>
       )}
 

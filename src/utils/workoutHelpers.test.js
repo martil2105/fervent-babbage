@@ -36,6 +36,9 @@ import {
   orderExercisesByRoutines,
   getWorkoutCompletion,
   parseWeightText,
+  buildWorkoutExercise,
+  summarizeSets,
+  getExerciseHistory,
 } from './workoutHelpers.js';
 
 // --- small builders to keep the cases readable --------------------------------
@@ -867,5 +870,81 @@ describe('parseWeightText', () => {
     expect(parseWeightText('-5').valid).toBe(false);
     expect(parseWeightText('1.2.3').valid).toBe(false);
     expect(parseWeightText('1,2.3').valid).toBe(false);
+  });
+});
+
+// --- Modular workouts (2026-09-30) ----------------------------------------------
+
+describe('buildWorkoutExercise', () => {
+  const DAY = 86400000;
+  const now = new Date('2026-09-30T12:00:00').getTime();
+  const def = { id: 'icp', name: 'Incline Chest Press', targetSets: 3, minReps: 8, maxReps: 12, muscleGroup: 'Chest', exerciseType: 'compound', restDuration: 120, weightStep: 2.5 };
+
+  it('prefills from the all-time best', () => {
+    const history = [
+      { id: 'a', timestamp: now - 10 * DAY, exercises: [{ exerciseId: 'icp', sets: [set(30, 10), set(30, 9), set(30, 8)] }] },
+      { id: 'b', timestamp: now - 3 * DAY, exercises: [{ exerciseId: 'icp', sets: [set(27.5, 12), set(27.5, 11), set(27.5, 10)] }] },
+    ];
+    const ex = buildWorkoutExercise(def, history, now);
+    expect(ex.sets.map((s) => s.weight)).toEqual([30, 30, 30]);
+    expect(ex.sets.map((s) => s.reps)).toEqual([10, 9, 8]);
+    expect(ex).toMatchObject({ exerciseId: 'icp', name: 'Incline Chest Press', targetRange: { min: 8, max: 12 }, weightStep: 2.5 });
+  });
+
+  it('falls back to the last session actually done when the best is stale', () => {
+    const history = [
+      { id: 'a', timestamp: now - 60 * DAY, exercises: [{ exerciseId: 'icp', sets: [set(40, 8)] }] },
+      { id: 'b', timestamp: now - 5 * DAY, exercises: [{ exerciseId: 'icp', sets: [set(30, 10)] }] },
+      { id: 'c', timestamp: now - 2 * DAY, exercises: [{ exerciseId: 'icp', sets: [set(45, 12, { completed: false })] }] },
+    ];
+    const ex = buildWorkoutExercise(def, history, now);
+    expect(ex.sets[0].weight).toBe(30);
+    expect(ex.sets[0].reps).toBe(10);
+    expect(ex.sets[1].reps).toBe(8); // min reps beyond what was logged
+  });
+
+  it('uses the starting weight, or leaves it blank, with no history', () => {
+    expect(buildWorkoutExercise({ ...def, startingWeight: 20 }, [], now).sets[0].weight).toBe(20);
+    expect(buildWorkoutExercise(def, [], now).sets[0].weight).toBe('');
+  });
+
+  it('fills sensible defaults for a sparse definition', () => {
+    const ex = buildWorkoutExercise({ id: 'x', name: 'Cable Fly', exerciseType: 'isolation' }, [], now);
+    expect(ex.sets).toHaveLength(4);
+    expect(ex.targetRange).toEqual({ min: 8, max: 12 });
+    expect(ex.weightStep).toBe(1);
+    expect(ex.muscleGroup).toBe('Other');
+  });
+});
+
+describe('summarizeSets', () => {
+  it('collapses a single weight to one figure', () => {
+    expect(summarizeSets([set(27.5, 12), set(27.5, 11), set(27.5, 10)])).toBe('27.5 kg × 12, 11, 10');
+  });
+  it('lists weight×reps when weights differ', () => {
+    expect(summarizeSets([set(25, 12), set(27.5, 10)])).toBe('25×12, 27.5×10');
+  });
+  it('ignores unticked sets and mentions warm-ups', () => {
+    expect(summarizeSets([warmup(10, 15), set(30, 10), set(30, 9, { completed: false })])).toBe('30 kg × 10 · +1 warm-up');
+    expect(summarizeSets([warmup(10, 15), warmup(15, 10)])).toBe('2 warm-ups');
+    expect(summarizeSets([])).toBe('No sets logged');
+  });
+});
+
+describe('getExerciseHistory', () => {
+  const sessions = [
+    { id: 'a', timestamp: D('2026-09-01'), routineName: 'Push', exercises: [{ exerciseId: 'icp', sets: [set(30, 10), set(30, 8)] }] },
+    { id: 'b', timestamp: D('2026-09-15'), exercises: [{ exerciseId: 'icp', sets: [set(32.5, 8, { completed: false })] }] },
+    { id: 'c', timestamp: D('2026-09-10'), exercises: [{ exerciseId: 'lr', sets: [set(8, 15)] }] },
+  ];
+  it('lists every session with the exercise, newest first', () => {
+    const h = getExerciseHistory('icp', sessions);
+    expect(h.map((x) => x.sessionId)).toEqual(['b', 'a']);
+    expect(h[1]).toMatchObject({ routineName: 'Push', volume: 540, logged: true });
+    expect(h[0]).toMatchObject({ routineName: null, volume: 0, logged: false });
+  });
+  it('is empty for an exercise never logged', () => {
+    expect(getExerciseHistory('nope', sessions)).toEqual([]);
+    expect(getExerciseHistory('icp', undefined)).toEqual([]);
   });
 });

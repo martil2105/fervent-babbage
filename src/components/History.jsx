@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Calendar, Clock, Trophy, ChevronDown, ChevronUp, Pencil, Plus, Trash2, Check, X } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import WeightInput from './WeightInput';
+import ExercisePicker from './ExercisePicker';
 import {
   formatDate,
   formatWeight,
@@ -9,8 +10,7 @@ import {
   getExerciseVolume,
   getPersonalBests,
   getDisplayExercises,
-  orderExercisesByRoutines,
-  SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS
+  orderExercisesByRoutines
 } from '../utils/workoutHelpers';
 
 // Convert a timestamp to the local "YYYY-MM-DDTHH:mm" string that
@@ -25,7 +25,16 @@ const toLocalInputValue = (ts) => {
 // as logged (completed: true) since the edit is describing what really happened.
 const emptySet = () => ({ weight: 0, reps: 0, isWarmup: false, completed: true, rpe: null, rir: null });
 
-export default function History({ history, exercises, routines = [], updateHistorySession, deleteHistorySession }) {
+export default function History({
+  history,
+  exercises,
+  routines = [],
+  catalog = [],
+  updateHistorySession,
+  deleteHistorySession,
+  createExercise,
+  onOpenExercise
+}) {
   const [activeSubTab, setActiveSubTab] = useState('logs'); // 'logs' | 'pbs'
   const [expandedSessionId, setExpandedSessionId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -35,9 +44,7 @@ export default function History({ history, exercises, routines = [], updateHisto
   // inputs write into. Nothing touches the DB until Save.
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [draft, setDraft] = useState(null);
-  const [addExerciseChoice, setAddExerciseChoice] = useState('');
-  const [customName, setCustomName] = useState('');
-  const [customMG, setCustomMG] = useState('Other');
+  const [showPicker, setShowPicker] = useState(false);
 
   const toggleExpandSession = (sessionId) => {
     if (editingSessionId === sessionId) return; // locked open while editing
@@ -53,8 +60,6 @@ export default function History({ history, exercises, routines = [], updateHisto
       // Deep copy so edits never mutate the live-query objects
       exercises: JSON.parse(JSON.stringify(session.exercises))
     });
-    setAddExerciseChoice('');
-    setCustomName('');
   };
 
   const cancelEdit = () => {
@@ -126,36 +131,31 @@ export default function History({ history, exercises, routines = [], updateHisto
     }));
   };
 
-  const addDraftExercise = () => {
-    let entry;
-    if (addExerciseChoice === '__custom__') {
-      if (!customName.trim()) return;
-      entry = {
-        exerciseId: `custom-${Date.now()}`,
-        name: customName.trim(),
-        sets: [emptySet()],
-        targetRange: { min: 8, max: 12 },
-        muscleGroup: customMG,
-        exerciseType: 'compound',
-        restDuration: 120
-      };
-    } else {
-      const cfg = exercises.find((e) => e.id === addExerciseChoice);
-      if (!cfg) return;
-      entry = {
-        exerciseId: cfg.id,
-        name: cfg.name,
-        sets: [emptySet()],
-        targetRange: { min: cfg.minReps, max: cfg.maxReps },
-        muscleGroup: cfg.muscleGroup || 'Other',
-        exerciseType: cfg.exerciseType || 'compound',
-        restDuration: cfg.restDuration || 120,
-        weightStep: cfg.weightStep
-      };
-    }
-    setDraft((prev) => ({ ...prev, exercises: [...prev.exercises, entry] }));
-    setAddExerciseChoice('');
-    setCustomName('');
+  // Exercises added to a past session come from the same list as everywhere
+  // else, so they join that exercise's history instead of starting a new one.
+  const addDraftExercise = (entry) => {
+    if (!entry) return;
+    const row = {
+      exerciseId: entry.id,
+      name: entry.name,
+      sets: [emptySet()],
+      targetRange: { min: entry.minReps ?? 8, max: entry.maxReps ?? 12 },
+      muscleGroup: entry.muscleGroup || 'Other',
+      exerciseType: entry.exerciseType || 'compound',
+      restDuration: entry.restDuration || 120,
+      weightStep: entry.weightStep
+    };
+    setDraft((prev) => (
+      prev.exercises.some((ex) => ex.exerciseId === row.exerciseId)
+        ? prev
+        : { ...prev, exercises: [...prev.exercises, row] }
+    ));
+    setShowPicker(false);
+  };
+
+  const createDraftExercise = async (fields) => {
+    const record = await createExercise?.(fields);
+    if (record) addDraftExercise(record);
   };
 
   // 1. Check if history exists
@@ -191,14 +191,9 @@ export default function History({ history, exercises, routines = [], updateHisto
   // 2. Fetch personal bests
   const pbs = getPersonalBests(history);
 
-  // Library in session order (Push's exercises, then Legs') for the pickers
-  // and the Personal Bests list.
+  // Library in session order (Push's exercises, then Legs') for the Personal
+  // Bests list.
   const orderedExercises = orderExercisesByRoutines(exercises, routines);
-
-  // Config exercises not already in the draft (for the "add exercise" picker)
-  const addableExercises = draft
-    ? orderedExercises.filter((ex) => !draft.exercises.some((d) => d.exerciseId === ex.id))
-    : [];
 
   const sessionPendingDelete = confirmDeleteId
     ? history.find((s) => s.id === confirmDeleteId)
@@ -301,7 +296,13 @@ export default function History({ history, exercises, routines = [], updateHisto
                       return (
                         <div key={idx} className="history-detail-exercise">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                            <span className="history-detail-exercise-name">{ex.name}</span>
+                            <button
+                              type="button"
+                              className="link-btn history-detail-exercise-name"
+                              onClick={() => onOpenExercise?.(ex.exerciseId)}
+                            >
+                              {ex.name}
+                            </button>
                             <span className="text-xs text-bold" style={{ color: 'var(--accent-strong)' }}>
                               {Math.round(exVol)} kg
                             </span>
@@ -493,63 +494,15 @@ export default function History({ history, exercises, routines = [], updateHisto
                       </div>
                     ))}
 
-                    {/* Add exercise */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <select
-                          className="form-input"
-                          style={{ flex: 1 }}
-                          value={addExerciseChoice}
-                          onChange={(e) => setAddExerciseChoice(e.target.value)}
-                        >
-                          <option value="">Add exercise…</option>
-                          {addableExercises.map((ex) => (
-                            <option key={ex.id} value={ex.id}>{ex.name}</option>
-                          ))}
-                          <option value="__custom__">Custom exercise…</option>
-                        </select>
-                        {addExerciseChoice !== '__custom__' && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            disabled={!addExerciseChoice}
-                            onClick={addDraftExercise}
-                          >
-                            <Plus size={14} />
-                          </button>
-                        )}
-                      </div>
-                      {addExerciseChoice === '__custom__' && (
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            style={{ flex: 1 }}
-                            placeholder="Exercise name"
-                            value={customName}
-                            onChange={(e) => setCustomName(e.target.value)}
-                          />
-                          <select
-                            className="form-input"
-                            style={{ width: '110px' }}
-                            value={customMG}
-                            onChange={(e) => setCustomMG(e.target.value)}
-                          >
-                            {MUSCLE_GROUPS.map((mg) => (
-                              <option key={mg} value={mg}>{mg}</option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            disabled={!customName.trim()}
-                            onClick={addDraftExercise}
-                          >
-                            <Plus size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    {/* Add exercise — from the shared list */}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setShowPicker(true)}
+                      style={{ marginTop: '10px', borderStyle: 'dashed', background: 'transparent', justifyContent: 'center' }}
+                    >
+                      <Plus size={14} /> Add exercise
+                    </button>
 
                     {/* Delete / Cancel / Save */}
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '12px' }}>
@@ -604,7 +557,9 @@ export default function History({ history, exercises, routines = [], updateHisto
                     <Trophy size={18} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span className="pb-exercise-name">{ex.name}</span>
+                    <button type="button" className="link-btn pb-exercise-name" onClick={() => onOpenExercise?.(ex.id)}>
+                      {ex.name}
+                    </button>
                     <span className="text-xs text-muted">
                       Target Reps: {ex.minReps}–{ex.maxReps}
                     </span>
@@ -631,6 +586,18 @@ export default function History({ history, exercises, routines = [], updateHisto
             );
           })}
         </div>
+      )}
+
+      {showPicker && draft && (
+        <ExercisePicker
+          catalog={catalog}
+          routines={routines}
+          history={history}
+          excludeIds={draft.exercises.map((ex) => ex.exerciseId)}
+          onPick={addDraftExercise}
+          onCreate={createDraftExercise}
+          onClose={() => setShowPicker(false)}
+        />
       )}
 
       {sessionPendingDelete && (

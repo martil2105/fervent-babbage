@@ -934,3 +934,100 @@ export const parseWeightText = (raw) => {
   if (!/^\d*\.?\d*$/.test(normalized)) return { valid: false };
   return { valid: true, value: roundWeight(normalized) };
 };
+
+/**
+ * Default +/- increment for an exercise with no weightStep of its own:
+ * compounds jump in 2 kg, isolations in 1 kg.
+ */
+export const defaultWeightStep = (exerciseType) =>
+  exerciseType === 'isolation' ? 1 : 2;
+
+/**
+ * Build one exercise of a new workout from its library definition and the
+ * history — the same prefill whether it comes from a session template or is
+ * added mid-workout from the exercise list.
+ *
+ * Weights anchor on the heaviest weight ever completed, unless that best is
+ * stale (see isBestStale), in which case they come from the last session in
+ * which the exercise was actually done. Reps follow that session set by set.
+ * With no history the weight is the exercise's startingWeight, or blank —
+ * never an invented number.
+ */
+export const buildWorkoutExercise = (ex, sessions, now) => {
+  const best = getAllTimeBest(ex.id, sessions);
+  const useBest = best !== null && !isBestStale(best, now);
+  const last = useBest ? null : getLastSessionSets(ex.id, sessions);
+
+  const loggedWeight = useBest
+    ? best.weight
+    : (last ? Math.max(...last.sets.map((s) => s.weight)) : null);
+  const lastReps = useBest ? best.reps : (last ? last.sets.map((s) => s.reps) : null);
+
+  const weight = loggedWeight !== null
+    ? loggedWeight
+    : (typeof ex.startingWeight === 'number' && ex.startingWeight > 0 ? ex.startingWeight : '');
+
+  const minReps = ex.minReps ?? 8;
+  const numSets = ex.targetSets || 4;
+  const sets = Array.from({ length: numSets }, (_, i) => ({
+    weight,
+    reps: lastReps && lastReps[i] !== undefined ? lastReps[i] : minReps,
+    completed: false,
+    isWarmup: false,
+    rpe: '',
+    rir: '',
+    completedAt: null
+  }));
+
+  return {
+    exerciseId: ex.id,
+    name: ex.name,
+    sets,
+    targetRange: { min: minReps, max: ex.maxReps ?? 12 },
+    muscleGroup: ex.muscleGroup || 'Other',
+    exerciseType: ex.exerciseType || 'compound',
+    restDuration: ex.restDuration || 120,
+    weightStep: ex.weightStep || defaultWeightStep(ex.exerciseType)
+  };
+};
+
+/**
+ * One line for a finished exercise: "27.5 kg × 12, 11, 10, 10" when every
+ * working set used the same weight, "27.5×12, 30×10" when not. Only ticked
+ * sets count; warm-ups are mentioned, not listed.
+ */
+export const summarizeSets = (sets) => {
+  const done = (sets || []).filter((s) => s && s.completed !== false);
+  const working = done.filter((s) => !s.isWarmup);
+  const warmups = done.length - working.length;
+  const warmText = warmups ? `${warmups} warm-up${warmups === 1 ? '' : 's'}` : '';
+  if (working.length === 0) return warmText || 'No sets logged';
+
+  const weights = working.map((s) => formatWeight(s.weight));
+  const reps = working.map((s) => parseInt(s.reps) || 0);
+  const body = weights.every((w) => w === weights[0])
+    ? `${weights[0]} kg × ${reps.join(', ')}`
+    : working.map((s, i) => `${weights[i]}×${reps[i]}`).join(', ');
+  return warmText ? `${body} · +${warmText}` : body;
+};
+
+/**
+ * Every session that included an exercise, newest first:
+ * [{ sessionId, timestamp, routineName, sets, volume, logged }] where `logged`
+ * is false for a session in which it was skipped entirely.
+ */
+export const getExerciseHistory = (exerciseId, sessions) =>
+  (Array.isArray(sessions) ? sessions : [])
+    .filter((s) => s.exercises?.some((e) => e.exerciseId === exerciseId))
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .map((s) => {
+      const entry = s.exercises.find((e) => e.exerciseId === exerciseId);
+      return {
+        sessionId: s.id,
+        timestamp: s.timestamp,
+        routineName: s.routineName || null,
+        sets: entry.sets || [],
+        volume: getExerciseVolume(entry.sets),
+        logged: hasLoggedSets(entry)
+      };
+    });

@@ -876,7 +876,7 @@ html, body {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  z-index: 1200; /* above sheets, so a confirm opened from a sheet sits on top */
   padding: 20px;
   backdrop-filter: blur(4px);
 }
@@ -961,4 +961,231 @@ html, body {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+}
+
+/* Sheets — full-height panels that rise over the page (exercise list, reorder,
+ * exercise history). Like the modal they sit above the page, so they keep the
+ * scrim; like everything else they are separated by a hairline, not a shadow. */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(18, 21, 26, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 1100;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 480px;
+  height: calc(100% - 28px - env(safe-area-inset-top, 0px));
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sheet-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.list-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 4px 0 -6px;
+}
+
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pick-row:last-child {
+  border-bottom: none;
+}
+
+.pick-row:active:not(:disabled) {
+  background-color: var(--bg-active);
+}
+
+.pick-row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pick-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pick-row-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-row-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.icon-btn:focus-visible,
+.pick-row:focus-visible,
+.sheet-close:focus-visible,
+.link-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* A name that opens something, set like text rather than like a button. */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* An exercise whose sets are all ticked folds to one line. */
+.exercise-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.exercise-done-check {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: var(--success-glow);
+  color: var(--success-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workout-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+/* iOS draws search fields with its own rounded chrome; use ours. */
+input[type='search'] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
 }
