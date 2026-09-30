@@ -1,7 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle } from 'lucide-react';
-import { SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS, formatWeight, roundWeight } from '../utils/workoutHelpers';
+import ConfirmDialog from './ConfirmDialog';
+import {
+  SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS,
+  formatWeight,
+  formatDate,
+  roundWeight,
+  orderExercisesByRoutines
+} from '../utils/workoutHelpers';
 import { isSupported as backupFolderSupported } from '../utils/autoBackup';
+import { parseBackup, summarizeSessions, countSessionsLostByRestore } from '../utils/backupFile';
 import {
   notificationsSupported,
   notificationPermission,
@@ -12,6 +20,7 @@ import { getStorageEstimate, formatBytes } from '../utils/storagePersistence';
 export default function Settings({
   exercises,
   routines = [],
+  history = [],
   preferences,
   updatePreference,
   addExerciseToConfig,
@@ -79,10 +88,20 @@ export default function Settings({
 
   // Import file ref
   const fileInputRef = useRef(null);
-  const [importStatus, setImportStatus] = useState(null);
+  const [importStatus, setImportStatus] = useState(null); // null | 'success' | 'error'
+  const [importError, setImportError] = useState(null);
+  // A checked backup waiting for the person to confirm the replace
+  const [pendingImport, setPendingImport] = useState(null); // { data, summary, fileName }
+  const [importing, setImporting] = useState(false);
 
   // Danger zone confirm
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Delete confirmations: { kind: 'exercise' | 'routine', id, name }
+  const [pendingDelete, setPendingDelete] = useState(null);
+
+  // Session order for the exercise list, so it reads like the workouts do.
+  const orderedExercises = orderExercisesByRoutines(exercises, routines);
 
   // Storage durability + backup freshness
   const [nowTs] = useState(() => Date.now()); // stable clock read (avoids impure render)
@@ -127,12 +146,18 @@ export default function Settings({
     setEditingId(null);
   };
 
-  const saveEditing = (id) => {
-    updateExerciseInConfig(id, {
-      name: editName,
+  const saveEditing = (ex) => {
+    // A cleared name would leave a blank row everywhere; keep the old one.
+    const name = editName.trim() || ex.name;
+    // Accept the rep range in either order rather than storing min > max,
+    // which would make "top of the range" unreachable for the progression hint.
+    const lo = parseInt(editMinReps) || 10;
+    const hi = parseInt(editMaxReps) || 12;
+    updateExerciseInConfig(ex.id, {
+      name,
       targetSets: parseInt(editSets) || 4,
-      minReps: parseInt(editMinReps) || 10,
-      maxReps: parseInt(editMaxReps) || 12,
+      minReps: Math.min(lo, hi),
+      maxReps: Math.max(lo, hi),
       muscleGroup: editMuscleGroup,
       exerciseType: editExerciseType,
       restDuration: parseInt(editRestDuration) || 120,
@@ -178,27 +203,65 @@ export default function Settings({
     fileInputRef.current?.click();
   };
 
+  const flashImportStatus = (status, error = null) => {
+    setImportStatus(status);
+    setImportError(error);
+    setTimeout(() => {
+      setImportStatus(null);
+      setImportError(null);
+    }, status === 'error' ? 6000 : 3000);
+  };
+
+  // Step 1: read and check the file, then ask. Nothing is written yet —
+  // importing replaces the whole log, so the person sees what's in the file
+  // (and what would be lost) before anything happens.
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string') {
-        const success = await importData(result);
-        if (success) {
-          setImportStatus('success');
-          setTimeout(() => setImportStatus(null), 3000);
-        } else {
-          setImportStatus('error');
-          setTimeout(() => setImportStatus(null), 3000);
-        }
+    reader.onload = (event) => {
+      const checked = parseBackup(event.target?.result ?? '');
+      if (!checked.ok) {
+        flashImportStatus('error', checked.error);
+        return;
       }
+      setPendingImport({ data: checked.data, summary: checked.summary, fileName: file.name });
     };
+    reader.onerror = () => flashImportStatus('error', 'That file couldn’t be read.');
     reader.readAsText(file);
-    e.target.value = '';
   };
+
+  // Step 2: confirmed — replace the data.
+  const confirmImport = async () => {
+    if (!pendingImport) return;
+    setImporting(true);
+    const success = await importData(pendingImport.data);
+    setImporting(false);
+    setPendingImport(null);
+    if (success) flashImportStatus('success');
+    else flashImportStatus('error', 'Nothing was changed — the backup couldn’t be written. Your current data is untouched.');
+  };
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    if (pendingDelete.kind === 'exercise') deleteExerciseFromConfig(pendingDelete.id);
+    else deleteRoutine(pendingDelete.id);
+    setPendingDelete(null);
+  };
+
+  const importSummary = pendingImport?.summary;
+  const currentSpan = summarizeSessions(history);
+  // A backup without a history key leaves the device's history alone (import
+  // only replaces what the file contains), so nothing would be lost there.
+  const sessionsLost = pendingImport && Array.isArray(pendingImport.data.history)
+    ? countSessionsLostByRestore(history, pendingImport.data.history)
+    : 0;
+  const formatSpan = (first, last) =>
+    first === null ? 'no workouts'
+      : first === last || formatDate(first) === formatDate(last) ? formatDate(last)
+        : `${formatDate(first)} – ${formatDate(last)}`;
 
   const currentPrefMode = preferences?.prefLoggingMode || 'RPE';
 
@@ -277,32 +340,44 @@ export default function Settings({
                 borderRadius: 'var(--radius-sm)'
               }}>
                 {isRenaming ? (
-                  <>
+                  <form
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      renameRoutine(routine.id, routineDraftName);
+                      setRenamingRoutineId(null);
+                    }}
+                  >
                     <input
                       className="form-input"
                       value={routineDraftName}
                       onChange={(e) => setRoutineDraftName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setRenamingRoutineId(null);
+                      }}
                       style={{ flex: 1, minWidth: 0 }}
                       aria-label="Session name"
+                      enterKeyHint="done"
+                      autoFocus
                     />
                     <button
+                      type="submit"
                       className="btn btn-secondary btn-icon-only btn-sm"
-                      onClick={() => {
-                        renameRoutine(routine.id, routineDraftName);
-                        setRenamingRoutineId(null);
-                      }}
                       style={{ border: 'none', background: 'none' }}
+                      aria-label="Save name"
                     >
-                      <Check size={14} style={{ color: 'var(--success)' }} />
+                      <Check size={14} style={{ color: 'var(--success-strong)' }} />
                     </button>
                     <button
+                      type="button"
                       className="btn btn-secondary btn-icon-only btn-sm"
                       onClick={() => setRenamingRoutineId(null)}
                       style={{ border: 'none', background: 'none' }}
+                      aria-label="Cancel rename"
                     >
                       <X size={14} style={{ color: 'var(--text-secondary)' }} />
                     </button>
-                  </>
+                  </form>
                 ) : (
                   <>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -327,7 +402,7 @@ export default function Settings({
                       className="btn btn-secondary btn-icon-only btn-sm"
                       disabled={routines.length <= 1}
                       title={routines.length <= 1 ? 'Keep at least one session' : undefined}
-                      onClick={() => deleteRoutine(routine.id)}
+                      onClick={() => setPendingDelete({ kind: 'routine', id: routine.id, name: routine.name, count })}
                       style={{ border: 'none', background: 'none', opacity: routines.length <= 1 ? 0.35 : 1 }}
                       aria-label={`Delete ${routine.name}`}
                     >
@@ -550,7 +625,7 @@ export default function Settings({
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {exercises.map((ex) => {
+          {orderedExercises.map((ex) => {
             const isEditing = editingId === ex.id;
             
             if (isEditing) {
@@ -672,7 +747,7 @@ export default function Settings({
                     <button className="btn btn-secondary btn-sm" onClick={cancelEditing}>
                       <X size={14} /> Cancel
                     </button>
-                    <button className="btn btn-primary btn-sm" onClick={() => saveEditing(ex.id)}>
+                    <button className="btn btn-primary btn-sm" onClick={() => saveEditing(ex)}>
                       <Check size={14} /> Save
                     </button>
                   </div>
@@ -742,10 +817,20 @@ export default function Settings({
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: '4px' }}>
-                  <button className="btn btn-secondary btn-icon-only btn-sm" onClick={() => startEditing(ex)} style={{ border: 'none', background: 'none' }}>
+                  <button
+                    className="btn btn-secondary btn-icon-only btn-sm"
+                    onClick={() => startEditing(ex)}
+                    style={{ border: 'none', background: 'none' }}
+                    aria-label={`Edit ${ex.name}`}
+                  >
                     <Edit2 size={14} style={{ color: 'var(--text-secondary)' }} />
                   </button>
-                  <button className="btn btn-secondary btn-icon-only btn-sm" onClick={() => deleteExerciseFromConfig(ex.id)} style={{ border: 'none', background: 'none' }}>
+                  <button
+                    className="btn btn-secondary btn-icon-only btn-sm"
+                    onClick={() => setPendingDelete({ kind: 'exercise', id: ex.id, name: ex.name })}
+                    style={{ border: 'none', background: 'none' }}
+                    aria-label={`Delete ${ex.name}`}
+                  >
                     <Trash2 size={14} style={{ color: 'var(--error)' }} />
                   </button>
                 </div>
@@ -841,7 +926,7 @@ export default function Settings({
               ? <ShieldCheck size={18} style={{ color: 'var(--success-strong)', flexShrink: 0 }} />
               : <ShieldAlert size={18} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} />}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span className="text-xs text-bold" style={{ color: storagePersisted ? 'var(--success)' : 'var(--warning)' }}>
+              <span className="text-xs text-bold" style={{ color: storagePersisted ? 'var(--success-strong)' : 'var(--warning-strong)' }}>
                 {storagePersisted ? 'Persistent storage on' : 'Best-effort storage'}
               </span>
               <span className="text-xs text-muted">
@@ -866,7 +951,7 @@ export default function Settings({
         )}
 
         {/* Backup freshness nudge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: backupStale ? 'var(--warning)' : 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: backupStale ? 'var(--warning-strong)' : 'var(--text-muted)' }}>
           {backupStale ? <AlertTriangle size={14} style={{ flexShrink: 0 }} /> : <Check size={14} style={{ flexShrink: 0 }} />}
           <span className={backupStale ? 'text-bold' : ''}>
             {backupLabel}{backupStale ? ' — export one to stay safe' : ''}
@@ -886,17 +971,17 @@ export default function Settings({
             ref={fileInputRef}
             onChange={handleFileChange}
             style={{ display: 'none' }}
-            accept=".json"
+            accept=".json,application/json"
           />
 
           {importStatus === 'success' && (
-            <div className="text-xs text-bold" style={{ color: 'var(--success-strong)', marginTop: '4px' }}>
-              ✓ Data imported successfully!
+            <div role="status" className="text-xs text-bold" style={{ color: 'var(--success-strong)', marginTop: '4px' }}>
+              ✓ Backup restored.
             </div>
           )}
           {importStatus === 'error' && (
-            <div className="text-xs text-bold" style={{ color: 'var(--error-strong)', marginTop: '4px' }}>
-              ✗ Error importing data. Make sure it's a valid backup file.
+            <div role="alert" className="text-xs text-bold" style={{ color: 'var(--error-strong)', marginTop: '4px' }}>
+              ✗ {importError || 'That file couldn’t be imported. Make sure it’s a backup exported from this app.'}
             </div>
           )}
         </div>
@@ -915,25 +1000,63 @@ export default function Settings({
 
       {/* Reset Confirmation Modal */}
       {showResetConfirm && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ borderColor: 'var(--cardinal-300)' }}>
-            <h3 style={{ margin: 0, color: 'var(--error-strong)' }}>Reset All Data?</h3>
-            <p className="text-muted" style={{ margin: 0, fontSize: '14px', lineHeight: '1.4' }}>
-              Are you absolutely sure you want to clear all data? This will erase your entire workout history and restore the default settings.
+        <ConfirmDialog
+          title="Reset all data?"
+          confirmLabel="Yes, reset everything"
+          onCancel={() => setShowResetConfirm(false)}
+          onConfirm={() => {
+            clearAllData();
+            setShowResetConfirm(false);
+          }}
+        >
+          Are you absolutely sure you want to clear all data? This will erase your entire workout history and restore the default settings.
+        </ConfirmDialog>
+      )}
+
+      {/* Import confirmation — shows what the file holds before it replaces anything */}
+      {pendingImport && importSummary && (
+        <ConfirmDialog
+          title="Replace your data with this backup?"
+          confirmLabel="Replace my data"
+          busy={importing}
+          onCancel={() => setPendingImport(null)}
+          onConfirm={confirmImport}
+        >
+          <p style={{ margin: '0 0 8px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Backup:</strong>{' '}
+            {importSummary.sessions} workout{importSummary.sessions === 1 ? '' : 's'}
+            {importSummary.sessions > 0 ? ` (${formatSpan(importSummary.firstAt, importSummary.lastAt)})` : ''},{' '}
+            {importSummary.exercises} exercise{importSummary.exercises === 1 ? '' : 's'}.
+          </p>
+          <p style={{ margin: '0 0 8px' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>This device:</strong>{' '}
+            {currentSpan.count} workout{currentSpan.count === 1 ? '' : 's'}
+            {currentSpan.count > 0 ? ` (latest ${formatDate(currentSpan.lastAt)})` : ''}.
+          </p>
+          {sessionsLost > 0 && (
+            <p style={{ margin: '0 0 8px', color: 'var(--error-strong)', fontWeight: 600 }}>
+              {sessionsLost} workout{sessionsLost === 1 ? '' : 's'} on this device {sessionsLost === 1 ? 'isn’t' : 'aren’t'} in
+              the backup and will be lost. Export a backup first if you want to keep {sessionsLost === 1 ? 'it' : 'them'}.
             </p>
-            <div className="modal-actions">
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowResetConfirm(false)}>
-                Cancel
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={() => {
-                clearAllData();
-                setShowResetConfirm(false);
-              }}>
-                Yes, Reset Everything
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+          <p style={{ margin: 0 }}>
+            Everything on this device is replaced by the backup.
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {/* Delete exercise / session confirmation */}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={pendingDelete.kind === 'exercise' ? `Delete ${pendingDelete.name}?` : `Delete the ${pendingDelete.name} session?`}
+          confirmLabel={pendingDelete.kind === 'exercise' ? 'Delete exercise' : 'Delete session'}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        >
+          {pendingDelete.kind === 'exercise'
+            ? 'It will be removed from your library and from every session it’s in. Workouts you’ve already logged keep it.'
+            : `Your ${pendingDelete.count || 0} exercise${pendingDelete.count === 1 ? '' : 's'} in it stay in the library, and logged workouts are kept — only the session and its exercise order go.`}
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'icons.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Hypertrophy Log',
         short_name: 'HypLog',
@@ -21,17 +21,27 @@ export default defineConfig({
         background_color: '#F7F8FA',
         display: 'standalone',
         orientation: 'portrait',
+        // Real PNGs at the sizes they claim. The maskable one keeps the mark
+        // inside the central safe zone, so Android's circle/squircle crop
+        // never clips it; "any maskable" on one file gets one of the two wrong.
         icons: [
           {
             src: 'icon-192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
             src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       },

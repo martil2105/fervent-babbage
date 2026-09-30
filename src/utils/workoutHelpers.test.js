@@ -29,6 +29,13 @@ import {
   formatWeight,
   MUSCLE_GROUPS,
   SELECTABLE_MUSCLE_GROUPS,
+  inferLegMuscleGroup,
+  resolveMuscleGroup,
+  hasLoggedSets,
+  getWeekToDateComparison,
+  orderExercisesByRoutines,
+  getWorkoutCompletion,
+  parseWeightText,
 } from './workoutHelpers.js';
 
 // --- small builders to keep the cases readable --------------------------------
@@ -337,6 +344,72 @@ describe('muscle group lists', () => {
   });
 });
 
+describe('inferLegMuscleGroup', () => {
+  it('classifies the leg-day machines', () => {
+    expect(inferLegMuscleGroup('Seated Leg Curl')).toBe('Hamstrings');
+    expect(inferLegMuscleGroup('Leg Extension')).toBe('Quads');
+    expect(inferLegMuscleGroup('Leg Press')).toBe('Quads');
+  });
+  it('falls back to the id when the name is unhelpful', () => {
+    expect(inferLegMuscleGroup('Machine 3', 'leg-curl')).toBe('Hamstrings');
+    expect(inferLegMuscleGroup(undefined, 'leg-extension')).toBe('Quads');
+  });
+  it('lets the more specific pattern win', () => {
+    expect(inferLegMuscleGroup('Leg Press Calf Raise')).toBe('Calves');
+    expect(inferLegMuscleGroup('Hip Extension')).toBe('Glutes');
+    expect(inferLegMuscleGroup('Romanian Deadlift')).toBe('Hamstrings');
+    expect(inferLegMuscleGroup('Bulgarian Split Squat')).toBe('Quads');
+  });
+  it('returns null rather than guessing', () => {
+    expect(inferLegMuscleGroup('Mystery Machine')).toBeNull();
+    expect(inferLegMuscleGroup()).toBeNull();
+  });
+});
+
+describe('resolveMuscleGroup', () => {
+  it('splits the retired Legs tag by name', () => {
+    expect(resolveMuscleGroup('Legs', 'Leg Press')).toBe('Quads');
+    expect(resolveMuscleGroup('Legs', 'Seated Leg Curl')).toBe('Hamstrings');
+  });
+  it('keeps Legs only when the name cannot be classified', () => {
+    expect(resolveMuscleGroup('Legs', 'Mystery Machine')).toBe('Legs');
+  });
+  it('never touches a specific tag, even a surprising one', () => {
+    expect(resolveMuscleGroup('Glutes', 'Leg Press')).toBe('Glutes');
+    expect(resolveMuscleGroup('Chest', 'Dumbbell Chest Press')).toBe('Chest');
+  });
+  it('defaults a missing tag to Other', () => {
+    expect(resolveMuscleGroup(undefined, 'Leg Press')).toBe('Other');
+  });
+});
+
+describe('groupSessionsByWeek — leg split', () => {
+  const legDay = {
+    id: 'legs',
+    timestamp: D('2026-09-14'),
+    exercises: [
+      { exerciseId: 'leg-press', name: 'Leg Press', muscleGroup: 'Legs', sets: [set(100, 10), set(100, 10)] },
+      { exerciseId: 'leg-curl', name: 'Seated Leg Curl', muscleGroup: 'Legs', sets: [set(40, 12), set(40, 12)] },
+      // An on-the-fly exercise that exists only in history, not the library
+      { exerciseId: 'custom-1', name: 'Leg Extension', muscleGroup: 'Legs', sets: [set(30, 15)] },
+    ],
+  };
+  it('counts old Legs-tagged sessions as quads and hamstrings', () => {
+    const [week] = groupSessionsByWeek([legDay], []);
+    expect(week.muscleGroupSets.Quads).toBe(3);
+    expect(week.muscleGroupSets.Hamstrings).toBe(2);
+    expect(week.muscleGroupSets.Legs).toBe(0);
+    expect(week.muscleGroupVolume.Quads).toBe(2000 + 450);
+    expect(week.muscleGroupVolume.Hamstrings).toBe(960);
+  });
+  it('prefers the library tag over what the session recorded', () => {
+    const library = [{ id: 'leg-press', name: 'Leg Press', muscleGroup: 'Glutes' }];
+    const [week] = groupSessionsByWeek([legDay], library);
+    expect(week.muscleGroupSets.Glutes).toBe(2);
+    expect(week.muscleGroupSets.Quads).toBe(1);
+  });
+});
+
 describe('getRoutineLastTrained', () => {
   const sessions = [
     { id: 'a', timestamp: 300, routineId: 'routine-legs' },
@@ -601,5 +674,198 @@ describe('getAccretionSeries', () => {
     expect(getAccretionSeries('nope', [day(1, 20)]).points).toEqual([]);
     expect(getAccretionSeries('press', []).total).toBe(0);
     expect(getAccretionSeries('press', null).points).toEqual([]);
+  });
+});
+
+// --- Review fixes (2026-09-30) -------------------------------------------------
+
+describe('getLastSessionSets — unticked sets', () => {
+  const skipped = (weight, reps) => set(weight, reps, { completed: false });
+
+  it('ignores a session where the exercise was skipped entirely', () => {
+    // The skipped session still carries the prefilled 14 kg that was never lifted
+    const sessions = [
+      { id: 'done', timestamp: D('2026-09-21'), exercises: [{ exerciseId: 'lat', sets: [set(10, 15), set(10, 14)] }] },
+      { id: 'skip', timestamp: D('2026-09-24'), exercises: [{ exerciseId: 'lat', sets: [skipped(14, 15), skipped(14, 15)] }] },
+    ];
+    const r = getLastSessionSets('lat', sessions);
+    expect(r.timestamp).toBe(D('2026-09-21'));
+    expect(r.sets).toEqual([{ weight: 10, reps: 15 }, { weight: 10, reps: 14 }]);
+  });
+
+  it('keeps only the sets that were ticked in a partly-finished session', () => {
+    const sessions = [
+      { id: 'p', timestamp: D('2026-09-24'), exercises: [{ exerciseId: 'bench', sets: [set(40, 12), set(40, 11), skipped(40, 10), skipped(40, 10)] }] },
+    ];
+    expect(getLastSessionSets('bench', sessions).sets).toEqual([{ weight: 40, reps: 12 }, { weight: 40, reps: 11 }]);
+  });
+
+  it('still reports ticked warm-ups when nothing else was done', () => {
+    const sessions = [{ id: 'w', timestamp: D('2026-09-24'), exercises: [{ exerciseId: 'bench', sets: [warmup(20, 12)] }] }];
+    expect(getLastSessionSets('bench', sessions).sets).toEqual([{ weight: 20, reps: 12 }]);
+  });
+
+  it('treats legacy sets without a completed flag as done', () => {
+    const sessions = [{ id: 'old', timestamp: D('2026-06-01'), exercises: [{ exerciseId: 'bench', sets: [{ weight: 30, reps: 10 }] }] }];
+    expect(getLastSessionSets('bench', sessions).sets).toEqual([{ weight: 30, reps: 10 }]);
+  });
+
+  it('returns null when every logged session was skipped', () => {
+    const sessions = [{ id: 's', timestamp: D('2026-09-24'), exercises: [{ exerciseId: 'lat', sets: [skipped(14, 15)] }] }];
+    expect(getLastSessionSets('lat', sessions)).toBeNull();
+  });
+});
+
+describe('hasLoggedSets', () => {
+  it('is true when any set was ticked, warm-ups included', () => {
+    expect(hasLoggedSets({ sets: [set(10, 10, { completed: false }), warmup(5, 10)] })).toBe(true);
+  });
+  it('is false for a fully skipped or missing entry', () => {
+    expect(hasLoggedSets({ sets: [set(10, 10, { completed: false })] })).toBe(false);
+    expect(hasLoggedSets({ sets: [] })).toBe(false);
+    expect(hasLoggedSets(undefined)).toBe(false);
+  });
+});
+
+describe('getReferenceExerciseData — skipped sessions', () => {
+  const DAY = 86400000;
+  const now = new Date('2026-09-30T12:00:00').getTime();
+  it('falls back past a skipped session to the last one that was done', () => {
+    const history = [
+      // best is stale, so the fallback path runs
+      { id: 'old-best', timestamp: now - 60 * DAY, exercises: [{ exerciseId: 'lat', sets: [set(12, 15)] }] },
+      { id: 'done', timestamp: now - 9 * DAY, exercises: [{ exerciseId: 'lat', sets: [set(10, 13)] }] },
+      { id: 'skip', timestamp: now - 6 * DAY, exercises: [{ exerciseId: 'lat', sets: [set(14, 15, { completed: false })] }] },
+    ];
+    const ref = getReferenceExerciseData('lat', history, now);
+    expect(ref.sets[0].weight).toBe(10);
+  });
+});
+
+describe('getProgressionSuggestion — wording', () => {
+  const sessionWith = (sets) => [{
+    id: 's', timestamp: D('2026-09-24'),
+    exercises: [{ exerciseId: 'press', targetRange: { min: 10, max: 15 }, sets }],
+  }];
+
+  it("names the exercise's own weight step", () => {
+    const s = getProgressionSuggestion('press', sessionWith([set(100, 15, { rpe: 8 }), set(100, 15, { rpe: 8 })]), { maxReps: 15, weightStep: 5 });
+    expect(s.type).toBe('weight');
+    expect(s.text).toContain('Add 5 kg next time.');
+  });
+
+  it('keeps the generic range when no step is known', () => {
+    const s = getProgressionSuggestion('press', sessionWith([set(100, 15, { rpe: 8 })]), { maxReps: 15 });
+    expect(s.text).toContain('+1kg to +2.5kg');
+  });
+
+  it('says "set" for one and "sets" for several', () => {
+    const one = getProgressionSuggestion('press', sessionWith([set(100, 15), set(100, 12)]), { maxReps: 15 });
+    const two = getProgressionSuggestion('press', sessionWith([set(100, 12), set(100, 12)]), { maxReps: 15 });
+    expect(one.text).toMatch(/remaining 1 set\.$/);
+    expect(two.text).toMatch(/remaining 2 sets\.$/);
+  });
+});
+
+describe('getWeekToDateComparison', () => {
+  const at = (s) => new Date(s).getTime();
+  const session = (iso, weight) => ({
+    id: iso, timestamp: at(iso),
+    exercises: [{ exerciseId: 'bench', sets: [set(weight, 10)] }],
+  });
+
+  it('compares this week so far with last week up to the same point', () => {
+    const now = at('2026-09-30T12:00:00'); // Wednesday
+    const history = [
+      session('2026-09-22T18:00:00', 40), // last Tue — before last week's cutoff
+      session('2026-09-26T11:00:00', 50), // last Sat — after it
+      session('2026-09-29T18:00:00', 44), // this Tue
+    ];
+    const r = getWeekToDateComparison(history, now);
+    expect(r.thisWeek).toEqual({ volume: 440, sessions: 1 });
+    expect(r.lastWeekSoFar).toEqual({ volume: 400, sessions: 1 });
+    expect(r.lastWeekTotal).toEqual({ volume: 900, sessions: 2 });
+    expect(r.trend).toEqual({ direction: 'up', percentChange: 10 });
+  });
+
+  it('does not score a week that has not started yet as a -100% drop', () => {
+    const now = at('2026-09-28T08:00:00'); // Monday morning
+    const history = [session('2026-09-24T18:00:00', 40), session('2026-09-26T11:00:00', 50)];
+    const r = getWeekToDateComparison(history, now);
+    expect(r.thisWeek.sessions).toBe(0);
+    expect(r.lastWeekSoFar.sessions).toBe(0);
+    expect(r.lastWeekTotal.sessions).toBe(2);
+    expect(r.trend.direction).toBe('none');
+  });
+
+  it('handles empty input', () => {
+    const r = getWeekToDateComparison(undefined, at('2026-09-30T12:00:00'));
+    expect(r.thisWeek).toEqual({ volume: 0, sessions: 0 });
+    expect(r.trend.direction).toBe('none');
+  });
+});
+
+describe('orderExercisesByRoutines', () => {
+  const lib = [
+    { id: 'db-chest-press' }, { id: 'db-shoulder-press' }, { id: 'lateral-raises' },
+    { id: 'leg-curl' }, { id: 'leg-extension' }, { id: 'leg-press' }, { id: 'orphan' },
+  ];
+  const routines = [
+    { id: 'routine-legs', order: 1, exerciseIds: ['leg-curl', 'leg-extension', 'leg-press'] },
+    { id: 'routine-push', order: 0, exerciseIds: ['db-shoulder-press', 'lateral-raises', 'db-chest-press'] },
+  ];
+
+  it('follows routine order, then session order, with unassigned exercises last', () => {
+    expect(orderExercisesByRoutines(lib, routines).map((e) => e.id)).toEqual([
+      'db-shoulder-press', 'lateral-raises', 'db-chest-press',
+      'leg-curl', 'leg-extension', 'leg-press', 'orphan',
+    ]);
+  });
+
+  it('places an exercise shared by two routines at its first appearance', () => {
+    const shared = [{ id: 'r1', order: 0, exerciseIds: ['b', 'a'] }, { id: 'r2', order: 1, exerciseIds: ['a', 'c'] }];
+    expect(orderExercisesByRoutines([{ id: 'a' }, { id: 'b' }, { id: 'c' }], shared).map((e) => e.id)).toEqual(['b', 'a', 'c']);
+  });
+
+  it('returns the library unchanged without routines, and never mutates it', () => {
+    const input = [{ id: 'z' }, { id: 'a' }];
+    expect(orderExercisesByRoutines(input, []).map((e) => e.id)).toEqual(['z', 'a']);
+    orderExercisesByRoutines(input, routines);
+    expect(input.map((e) => e.id)).toEqual(['z', 'a']);
+  });
+});
+
+describe('getWorkoutCompletion', () => {
+  it('counts ticked and open sets across exercises', () => {
+    const workout = { exercises: [
+      { sets: [{ completed: true }, { completed: false }] },
+      { sets: [{ completed: true }, { completed: true }, { completed: false }] },
+    ] };
+    expect(getWorkoutCompletion(workout)).toEqual({ total: 5, logged: 3, unlogged: 2 });
+  });
+  it('is all zeros for no workout', () => {
+    expect(getWorkoutCompletion(null)).toEqual({ total: 0, logged: 0, unlogged: 0 });
+  });
+});
+
+describe('parseWeightText', () => {
+  it('accepts a comma or a point as the decimal mark', () => {
+    expect(parseWeightText('27,5')).toEqual({ valid: true, value: 27.5 });
+    expect(parseWeightText('27.5')).toEqual({ valid: true, value: 27.5 });
+  });
+  it('lets a number in progress through', () => {
+    expect(parseWeightText('27,')).toEqual({ valid: true, value: 27 });
+    expect(parseWeightText(',')).toEqual({ valid: true, value: '' });
+    expect(parseWeightText('')).toEqual({ valid: true, value: '' });
+  });
+  it('snaps to the half-kilo grid', () => {
+    expect(parseWeightText('12.3').value).toBe(12.5);
+    expect(parseWeightText('12.2').value).toBe(12);
+  });
+  it('rejects letters, signs and a second decimal mark', () => {
+    expect(parseWeightText('12a').valid).toBe(false);
+    expect(parseWeightText('-5').valid).toBe(false);
+    expect(parseWeightText('1.2.3').valid).toBe(false);
+    expect(parseWeightText('1,2.3').valid).toBe(false);
   });
 });

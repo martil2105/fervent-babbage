@@ -129,6 +129,15 @@ html, body {
   gap: 20px;
 }
 
+/* Small phones (iPhone SE / mini): the set rows need every pixel, so the
+ * page gutter gives some back. */
+@media (max-width: 380px) {
+  .app-content {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
 .app-navigation {
   position: fixed;
   bottom: 0;
@@ -323,17 +332,121 @@ html, body {
   width: fit-content;
 }
 
-.set-row {
+/* One set per row: number · weight · reps · effort · log · remove.
+ * The weight column gets the most room — at iPhone width the old
+ * 44px/1fr/1fr/60px layout left the weight field ~18px wide, so "27.5"
+ * displayed as "27". Fixed columns are only as wide as their content. */
+.set-grid {
   display: grid;
-  grid-template-columns: 44px 1fr 1fr 60px 36px 24px;
+  grid-template-columns: 28px minmax(0, 1.3fr) minmax(0, 1fr) 46px 36px 22px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.set-grid-header {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: center;
+}
+
+.set-row {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-color);
 }
 
 .set-row:last-child {
   border-bottom: none;
+}
+
+/* Set number; tap to toggle warm-up ("W"). */
+.set-badge {
+  height: 38px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.set-badge.is-warmup {
+  background-color: var(--warning-glow);
+  border-color: var(--fox-200);
+  color: var(--warning-strong);
+}
+
+/* RPE / RIR picker. No native chevron — the column header names the scale
+ * and the box says "tap me"; the room goes to the value instead. */
+.set-effort {
+  height: 38px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 16px; /* 16px or iOS zooms the page on focus */
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-align-last: center;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.set-effort:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.set-log {
+  height: 38px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.set-log.is-done {
+  border-color: var(--success);
+  background-color: var(--success-glow);
+  color: var(--success-strong);
+}
+
+.set-remove {
+  height: 38px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.set-badge:focus-visible,
+.set-log:focus-visible,
+.set-remove:focus-visible,
+.input-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .set-index-label {
@@ -355,6 +468,8 @@ html, body {
 
 .input-control input {
   width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
   background: none;
   border: none;
   color: var(--text-primary);
@@ -384,9 +499,12 @@ html, body {
   background: none;
   border: none;
   color: var(--text-secondary);
+  font-family: inherit;
   font-size: 16px;
   font-weight: 600;
-  width: 32px;
+  width: 22px;
+  flex: 0 0 22px;
+  padding: 0;
   height: 100%;
   display: flex;
   align-items: center;

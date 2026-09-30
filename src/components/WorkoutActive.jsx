@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { notifyRestComplete } from '../utils/restNotification';
+import { useState, useEffect, useMemo } from 'react';
 import { Play, Check, Trash2, Plus, X, Dumbbell, Ghost, TrendingUp, Trophy } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import AccretionStrip from './AccretionStrip';
+import ConfirmDialog from './ConfirmDialog';
+import WeightInput from './WeightInput';
 import {
   getProgressionSuggestion,
   getLastSessionSets,
@@ -10,9 +11,127 @@ import {
   getDaysSinceRoutine,
   getAllTimeBest,
   getAccretionSeries,
+  getWorkoutCompletion,
   roundWeight,
-  formatWeight
+  formatWeight,
+  SELECTABLE_MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
+
+// Format seconds to MM:SS (or H:MM:SS past the hour)
+const formatDuration = (seconds) => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const pad = (val) => String(val).padStart(2, '0');
+  if (hrs > 0) return `${hrs}:${pad(mins)}:${pad(secs)}`;
+  return `${pad(mins)}:${pad(secs)}`;
+};
+
+// The session clock ticks on its own, so the once-a-second update repaints
+// one number instead of every set row on the page.
+function ElapsedClock({ startTime }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startTime]);
+  return <span className="timer-text">{formatDuration(elapsed)}</span>;
+}
+
+// Floating rest panel. Also ticks on its own (every 500 ms). The alert itself
+// — vibration, notification, auto-clear — lives in useRestAlarm at the app
+// root, so it still fires when you're on another tab.
+function RestPanel({ restEndTime, restTotalMs, extendRestTimer, clearRestTimer }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  const timeRemaining = restEndTime - now;
+  const timerSeconds = timeRemaining > 0 ? Math.ceil(timeRemaining / 1000) : 0;
+  const isFlashing = timeRemaining <= 0;
+  // The interval is read by length before it is read as a number. Fraction of
+  // the rest still owed, 1 -> 0; 0 when we have no denominator to divide by.
+  const restRemaining = restTotalMs > 0
+    ? Math.min(Math.max(timeRemaining / restTotalMs, 0), 1)
+    : 0;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 'calc(75px + env(safe-area-inset-bottom, 0px))',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: 'calc(100% - 32px)',
+        maxWidth: '448px',
+        backgroundColor: isFlashing ? 'var(--warning-glow)' : 'var(--bg-card)',
+        borderColor: isFlashing ? 'var(--warning)' : 'var(--border-color)',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+        borderRadius: 'var(--radius-md)',
+        padding: '12px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        zIndex: 999
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }} aria-live="polite">
+          <span className="text-xs text-bold" style={{
+            color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)',
+            whiteSpace: 'nowrap'
+          }}>
+            {isFlashing ? 'REST COMPLETE' : 'RESTING'}
+          </span>
+          <span className="magnitude" style={{ fontSize: '26px' }}>
+            {isFlashing ? '0:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => extendRestTimer(30)}
+            style={{ padding: '6px 10px', fontSize: '12px' }}
+          >
+            +30s
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger btn-sm"
+            onClick={clearRestTimer}
+            style={{ padding: '6px 10px', fontSize: '12px' }}
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+
+      {/* The rule. It shortens; nothing rotates and nothing pulses. When the
+          interval is over it fills out in fox rather than vanishing. */}
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round((isFlashing ? 1 : restRemaining) * 100)}
+        aria-label="Rest remaining"
+        style={{ height: '2px', backgroundColor: 'var(--bg-secondary)', overflow: 'hidden' }}
+      >
+        <div style={{
+          height: '100%',
+          width: `${(isFlashing ? 1 : restRemaining) * 100}%`,
+          backgroundColor: isFlashing ? 'var(--warning)' : 'var(--text-primary)',
+          transition: 'width 0.5s linear'
+        }} />
+      </div>
+    </div>
+  );
+}
 
 export default function WorkoutActive({
   currentWorkout,
@@ -31,108 +150,52 @@ export default function WorkoutActive({
   extendRestTimer,
   clearRestTimer
 }) {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [customExerciseName, setCustomExerciseName] = useState('');
   const [customExerciseMG, setCustomExerciseMG] = useState('Shoulders');
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  // 'empty' | 'partial' while the finish dialog is open
+  const [finishPrompt, setFinishPrompt] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
-  // Pure state for clock ticks to prevent calling impure Date.now() during render
-  const [now, setNow] = useState(() => Date.now());
+  // Stable clock read for the start screen — react-compiler rejects
+  // Date.now() during render.
+  const [now] = useState(() => Date.now());
 
-  // Derive rest timer values dynamically using pure state
-  const timeRemaining = restEndTime ? restEndTime - now : 0;
-  const timerSeconds = timeRemaining > 0 ? Math.ceil(timeRemaining / 1000) : 0;
-  const isFlashing = restEndTime !== null && timeRemaining <= 0;
-  // The interval is read by length before it is read as a number. Fraction of
-  // the rest still owed, 1 -> 0; 0 when we have no denominator to divide by.
-  const restRemaining = restTotalMs > 0
-    ? Math.min(Math.max(timeRemaining / restTotalMs, 0), 1)
-    : 0;
-
-  // Active workout duration timer
-  useEffect(() => {
-    if (!currentWorkout) return;
-
-    const calculateElapsed = () => {
-      const elapsed = Math.floor((Date.now() - currentWorkout.startTime) / 1000);
-      setElapsedSeconds(elapsed >= 0 ? elapsed : 0);
-    };
-
-    calculateElapsed();
-    const interval = setInterval(calculateElapsed, 1000);
-
-    return () => clearInterval(interval);
-  }, [currentWorkout]);
-
-  // Mirrored in a ref so the rest-timer effect can name the exercise without
-  // taking currentWorkout as a dependency — that would restart the effect on
-  // every keystroke and re-arm the already-fired alert.
-  const workoutRef = useRef(currentWorkout);
-  useEffect(() => {
-    workoutRef.current = currentWorkout;
-  }, [currentWorkout]);
-
-  // Rest timer countdown and vibration/auto-clear
-  useEffect(() => {
-    if (!restEndTime) return;
-
-    let vibrated = false;
-    let autoClearId = null;
-
-    // The exercise you were resting from: whichever holds the most recently
-    // completed set.
-    const restingFrom = () => {
-      const exercises = workoutRef.current?.exercises || [];
-      let name = null;
-      let latest = -Infinity;
-      exercises.forEach((ex) => {
-        (ex.sets || []).forEach((s) => {
-          if (s.completedAt && s.completedAt > latest) {
-            latest = s.completedAt;
-            name = ex.name;
-          }
-        });
-      });
-      return name;
-    };
-
-    const checkTimer = () => {
-      setNow(Date.now());
-      const diff = restEndTime - Date.now();
-      if (diff <= 0 && !vibrated) {
-        vibrated = true;
-        if (navigator.vibrate) {
-          navigator.vibrate([300, 100, 300]);
-        }
-        // No-ops unless permission was granted and the app is backgrounded.
-        notifyRestComplete({ exerciseName: restingFrom() });
-        // Auto clear after 6 seconds of flashing (scheduled once)
-        autoClearId = setTimeout(() => {
-          clearRestTimer();
-        }, 6000);
-      }
-    };
-
-    checkTimer();
-    const timerInterval = setInterval(checkTimer, 500);
-
-    return () => {
-      clearInterval(timerInterval);
-      if (autoClearId) clearTimeout(autoClearId);
-    };
-  }, [restEndTime, clearRestTimer]);
-
-  // Format seconds to MM:SS
-  const formatDuration = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    const pad = (val) => String(val).padStart(2, '0');
-    
-    if (hrs > 0) return `${hrs}:${pad(mins)}:${pad(secs)}`;
-    return `${pad(mins)}:${pad(secs)}`;
-  };
+  // Everything each exercise card derives from history, computed when the
+  // workout or the history changes — not on every clock tick.
+  const workoutExercises = currentWorkout?.exercises;
+  const workoutStart = currentWorkout?.startTime;
+  const insights = useMemo(() => {
+    const map = {};
+    (workoutExercises || []).forEach((ex) => {
+      // The hint reads the same session the prefill anchored to — same clock
+      // reading (the session start), same staleness fallback after a layoff.
+      const suggestion = getProgressionSuggestion(
+        ex.exerciseId,
+        history,
+        { maxReps: ex.targetRange.max, weightStep: ex.weightStep },
+        workoutStart
+      );
+      const last = getLastSessionSets(ex.exerciseId, history);
+      const best = getAllTimeBest(ex.exerciseId, history);
+      const lastTopWeight = last && last.sets.length > 0
+        ? Math.max(...last.sets.map((s) => s.weight))
+        : 0;
+      map[ex.exerciseId] = {
+        suggestion,
+        last,
+        best,
+        accretion: getAccretionSeries(ex.exerciseId, history),
+        // All-time best is what the prefill anchors to, so show it — and say
+        // so when the last session came in under it, which is the one case
+        // where the prefilled weight won't match what you last lifted.
+        belowBest: best !== null && last !== null && lastTopWeight < best.weight
+      };
+    });
+    return map;
+  }, [history, workoutExercises, workoutStart]);
 
   if (!currentWorkout) {
     return (
@@ -215,14 +278,6 @@ export default function WorkoutActive({
     updateSet(exId, setIdx, 'weight', Math.max(0, roundWeight(base + delta)));
   };
 
-  const handleWeightInput = (exId, setIdx, raw) => {
-    if (raw === '') {
-      updateSet(exId, setIdx, 'weight', '');
-      return;
-    }
-    updateSet(exId, setIdx, 'weight', roundWeight(raw));
-  };
-
   // Fallback increment for active sessions started before weightStep existed.
   const stepFor = (ex) => ex.weightStep || (ex.exerciseType === 'isolation' ? 1 : 2);
 
@@ -233,18 +288,39 @@ export default function WorkoutActive({
     updateSet(exId, setIdx, 'reps', newVal);
   };
 
-  // Handle workout completion
-  const handleFinishWorkout = () => {
-    const completedSession = completeWorkout();
-    if (completedSession) {
-      confetti({
-        particleCount: 120,
-        spread: 70,
-        origin: { y: 0.75 },
-        colors: ['#58CC02', '#1CB0F6', '#FFC800', '#FF4B4B']
-      });
+  const finishWorkout = async () => {
+    setFinishPrompt(null);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const completedSession = await completeWorkout();
+      if (completedSession) {
+        confetti({
+          particleCount: 120,
+          spread: 70,
+          origin: { y: 0.75 },
+          colors: ['#58CC02', '#1CB0F6', '#FFC800', '#FF4B4B']
+        });
+      }
+    } catch (err) {
+      console.error('Saving the workout failed:', err);
+      setSaveError('Couldn’t save this workout. Nothing is lost — it’s still open here, so try Finish again.');
+    } finally {
+      setSaving(false);
     }
   };
+
+  // Finishing with every set ticked goes straight through. Anything else asks
+  // first: unticked sets don't count, and a session with nothing ticked would
+  // only add an empty entry to history (and a fake "trained today").
+  const requestFinish = () => {
+    const { total, logged } = getWorkoutCompletion(currentWorkout);
+    if (logged === 0) setFinishPrompt('empty');
+    else if (logged < total) setFinishPrompt('partial');
+    else finishWorkout();
+  };
+
+  const completion = getWorkoutCompletion(currentWorkout);
 
   const handleAddCustomExercise = (e) => {
     e.preventDefault();
@@ -254,46 +330,52 @@ export default function WorkoutActive({
     setShowAddCustom(false);
   };
 
+  const effortMode = preferences.prefLoggingMode === 'RIR' ? 'RIR' : 'RPE';
+
   return (
     <div className="tab-content" style={{ paddingBottom: restEndTime ? '172px' : '90px' }}>
       {/* 1. Timer Banner */}
       <div className="timer-banner">
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span className="text-xs text-muted text-bold">DURATION</span>
-          <span className="timer-text">{formatDuration(elapsedSeconds)}</span>
+          <ElapsedClock startTime={currentWorkout.startTime} />
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-danger btn-sm" onClick={() => setShowCancelConfirm(true)}>
+          <button className="btn btn-danger btn-sm" onClick={() => setShowCancelConfirm(true)} disabled={saving}>
             Cancel
           </button>
-          <button className="btn btn-success btn-sm" onClick={handleFinishWorkout}>
-            <Check size={14} /> Finish
+          <button className="btn btn-success btn-sm" onClick={requestFinish} disabled={saving}>
+            <Check size={14} /> {saving ? 'Saving…' : 'Finish'}
           </button>
         </div>
       </div>
 
+      {saveError && (
+        <div role="alert" className="text-xs text-bold" style={{
+          color: 'var(--error-strong)',
+          backgroundColor: 'var(--error-glow)',
+          border: '1px solid var(--cardinal-200)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '10px 12px',
+          marginTop: '-6px'
+        }}>
+          {saveError}
+        </div>
+      )}
+
       {/* 2. Exercises Logging List */}
       {currentWorkout.exercises.map((ex) => {
-        const mockDef = { maxReps: ex.targetRange.max };
-        // `now` keeps the hint reading the same session the prefill anchored to,
-        // including the staleness fallback after a layoff.
-        const suggestion = getProgressionSuggestion(ex.exerciseId, history, mockDef, now);
+        const { suggestion, last, best, accretion, belowBest } = insights[ex.exerciseId] || {};
         const weightStep = stepFor(ex);
-        const last = getLastSessionSets(ex.exerciseId, history);
         // Per-set target: beat last time's reps by one, or if you already hit the
         // top of the rep range last time, the goal becomes adding weight.
         const repTarget = (prevReps) =>
           prevReps >= ex.targetRange.max ? null : prevReps + 1;
 
-        // All-time best is what the prefill anchors to, so show it — and say so
-        // when the last session came in under it, which is the one case where
-        // the prefilled weight won't match what you last actually lifted.
-        const best = getAllTimeBest(ex.exerciseId, history);
-        const accretion = getAccretionSeries(ex.exerciseId, history);
-        const lastTopWeight = last && last.sets.length > 0
-          ? Math.max(...last.sets.map((s) => s.weight))
-          : 0;
-        const belowBest = best !== null && lastTopWeight < best.weight;
+        // Working sets are numbered 1, 2, 3…; warm-ups show "W" and don't
+        // take a number — the convention most logging apps use.
+        let workingCount = 0;
+        const setLabels = ex.sets.map((s) => (s.isWarmup ? 'W' : String(++workingCount)));
 
         return (
           <div key={ex.exerciseId} className="card">
@@ -384,7 +466,7 @@ export default function WorkoutActive({
 
                 {/* Every session you have ever logged for this lift, as ticks.
                     The green one is where the record was set. */}
-                {accretion.points.length >= 2 && (
+                {accretion && accretion.points.length >= 2 && (
                   <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
                     <AccretionStrip
                       points={accretion.points}
@@ -397,197 +479,159 @@ export default function WorkoutActive({
             )}
 
             {/* Set Table header */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '44px 1fr 1fr 60px 36px 24px',
-              gap: '8px',
-              fontSize: '11px', 
-              color: 'var(--text-secondary)',
-              fontWeight: 600,
-              paddingBottom: '4px',
-              borderBottom: '1px solid var(--border-color)',
-              textAlign: 'center'
-            }}>
-              <span style={{ textAlign: 'left' }}>TYPE</span>
-              <span>WEIGHT</span>
+            <div className="set-grid set-grid-header" aria-hidden="true">
+              <span>SET</span>
+              <span>KG</span>
               <span>REPS</span>
-              <span>{preferences.prefLoggingMode}</span>
+              <span>{effortMode}</span>
               <span>LOG</span>
               <span></span>
             </div>
 
             {/* Sets Inputs */}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {ex.sets.map((set, idx) => (
-                <div key={idx} className="set-row" style={{ 
-                  opacity: set.completed ? 0.6 : 1,
-                  backgroundColor: set.completed ? 'var(--bg-secondary)' : 'transparent'
-                }}>
-                  {/* 1. Warmup Toggle */}
-                  <button 
-                    type="button"
-                    onClick={() => updateSet(ex.exerciseId, idx, 'isWarmup', !set.isWarmup)}
-                    style={{ 
-                      fontSize: '10px', 
-                      borderRadius: '6px', 
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: set.isWarmup ? 'var(--warning-glow)' : 'transparent',
-                      color: set.isWarmup ? 'var(--warning-strong)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      height: '38px',
-                      fontWeight: 700,
-                      padding: '0',
-                      transition: 'var(--transition)'
-                    }}
-                  >
-                    {set.isWarmup ? 'WARM' : 'WORK'}
-                  </button>
-                  
-                  {/* 2. Weight Control */}
-                  <div className="input-control">
+              {ex.sets.map((set, idx) => {
+                const label = setLabels[idx];
+                const setName = set.isWarmup ? `Warm-up set` : `Set ${label}`;
+                return (
+                  <div key={idx} className="set-grid set-row" style={{
+                    opacity: set.completed ? 0.6 : 1,
+                    backgroundColor: set.completed ? 'var(--bg-secondary)' : 'transparent'
+                  }}>
+                    {/* 1. Set number — tap to toggle warm-up */}
                     <button
                       type="button"
-                      className="input-btn"
-                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, -weightStep)}
-                      style={{ width: '20px' }}
+                      className={`set-badge${set.isWarmup ? ' is-warmup' : ''}`}
+                      onClick={() => updateSet(ex.exerciseId, idx, 'isWarmup', !set.isWarmup)}
+                      aria-pressed={!!set.isWarmup}
+                      aria-label={`${setName}. ${set.isWarmup ? 'Tap to make it a working set' : 'Tap to mark as warm-up'}`}
+                      title={set.isWarmup ? 'Warm-up (not counted) — tap for a working set' : 'Working set — tap to mark as warm-up'}
                     >
-                      -
+                      {label}
                     </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      step={weightStep}
-                      min="0"
-                      value={set.weight}
-                      onChange={(e) => handleWeightInput(ex.exerciseId, idx, e.target.value)}
-                    />
+
+                    {/* 2. Weight Control */}
+                    <div className="input-control">
+                      <button
+                        type="button"
+                        className="input-btn"
+                        onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, -weightStep)}
+                        aria-label={`${setName}: ${formatWeight(weightStep)} kg lighter`}
+                      >
+                        −
+                      </button>
+                      <WeightInput
+                        value={set.weight}
+                        onChange={(value) => updateSet(ex.exerciseId, idx, 'weight', value)}
+                        aria-label={`${setName} weight, kg`}
+                      />
+                      <button
+                        type="button"
+                        className="input-btn"
+                        onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, weightStep)}
+                        aria-label={`${setName}: ${formatWeight(weightStep)} kg heavier`}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {/* 3. Reps Control */}
+                    <div className="input-control">
+                      <button
+                        type="button"
+                        className="input-btn"
+                        onClick={() => handleRepsChange(ex.exerciseId, idx, set.reps, -1)}
+                        aria-label={`${setName}: one rep fewer`}
+                      >
+                        −
+                      </button>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        enterKeyHint="done"
+                        value={set.reps}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => updateSet(ex.exerciseId, idx, 'reps', e.target.value.replace(/\D/g, ''))}
+                        aria-label={`${setName} reps`}
+                      />
+                      <button
+                        type="button"
+                        className="input-btn"
+                        onClick={() => handleRepsChange(ex.exerciseId, idx, set.reps, 1)}
+                        aria-label={`${setName}: one rep more`}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {/* 4. RPE/RIR Select — the column header names the scale,
+                        so an empty cell is just a dash. */}
+                    {effortMode === 'RPE' ? (
+                      <select
+                        value={set.rpe}
+                        onChange={(e) => updateSet(ex.exerciseId, idx, 'rpe', e.target.value)}
+                        className="set-effort"
+                        aria-label={`${setName} RPE`}
+                      >
+                        <option value="">–</option>
+                        <option value="10">10</option>
+                        <option value="9.5">9.5</option>
+                        <option value="9">9</option>
+                        <option value="8.5">8.5</option>
+                        <option value="8">8</option>
+                        <option value="7.5">7.5</option>
+                        <option value="7">7</option>
+                        <option value="6.5">6.5</option>
+                        <option value="6">6</option>
+                      </select>
+                    ) : (
+                      <select
+                        value={set.rir}
+                        onChange={(e) => updateSet(ex.exerciseId, idx, 'rir', e.target.value)}
+                        className="set-effort"
+                        aria-label={`${setName} reps in reserve`}
+                      >
+                        <option value="">–</option>
+                        <option value="0">0</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                      </select>
+                    )}
+
+                    {/* 5. Checkmark Log Button */}
                     <button
                       type="button"
-                      className="input-btn"
-                      onClick={() => handleWeightChange(ex.exerciseId, idx, set.weight, weightStep)}
-                      style={{ width: '20px' }}
+                      className={`set-log${set.completed ? ' is-done' : ''}`}
+                      onClick={() => updateSet(ex.exerciseId, idx, 'completed', !set.completed)}
+                      aria-pressed={!!set.completed}
+                      aria-label={set.completed ? `${setName} logged — tap to undo` : `Log ${setName.toLowerCase()}`}
                     >
-                      +
+                      <Check size={16} strokeWidth={3} />
+                    </button>
+
+                    {/* 6. Remove Set */}
+                    <button
+                      type="button"
+                      className="set-remove"
+                      onClick={() => removeSetFromActive(ex.exerciseId, idx)}
+                      aria-label={`Remove ${setName.toLowerCase()}`}
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
-
-                  {/* 3. Reps Control */}
-                  <div className="input-control">
-                    <button 
-                      type="button" 
-                      className="input-btn"
-                      onClick={() => handleRepsChange(ex.exerciseId, idx, set.reps, -1)}
-                      style={{ width: '20px' }}
-                    >
-                      -
-                    </button>
-                    <input 
-                      type="number" 
-                      value={set.reps}
-                      onChange={(e) => updateSet(ex.exerciseId, idx, 'reps', e.target.value)}
-                    />
-                    <button 
-                      type="button" 
-                      className="input-btn"
-                      onClick={() => handleRepsChange(ex.exerciseId, idx, set.reps, 1)}
-                      style={{ width: '20px' }}
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  {/* 4. RPE/RIR Select */}
-                  {preferences.prefLoggingMode === 'RPE' ? (
-                    <select 
-                      value={set.rpe} 
-                      onChange={(e) => updateSet(ex.exerciseId, idx, 'rpe', e.target.value)}
-                      className="form-input"
-                      style={{ 
-                        padding: '0 2px', 
-                        height: '38px', 
-                        fontSize: '16px', 
-                        textAlign: 'center', 
-                        borderRadius: '6px', 
-                        backgroundColor: 'var(--bg-secondary)', 
-                        border: '1px solid var(--border-color)', 
-                        color: 'var(--text-primary)' 
-                      }}
-                    >
-                      <option value="">RPE</option>
-                      <option value="10">10</option>
-                      <option value="9.5">9.5</option>
-                      <option value="9">9.0</option>
-                      <option value="8.5">8.5</option>
-                      <option value="8">8.0</option>
-                      <option value="7.5">7.5</option>
-                      <option value="7">7.0</option>
-                      <option value="6.5">6.5</option>
-                      <option value="6">6.0</option>
-                    </select>
-                  ) : (
-                    <select 
-                      value={set.rir} 
-                      onChange={(e) => updateSet(ex.exerciseId, idx, 'rir', e.target.value)}
-                      className="form-input"
-                      style={{ 
-                        padding: '0 2px', 
-                        height: '38px', 
-                        fontSize: '16px', 
-                        textAlign: 'center', 
-                        borderRadius: '6px', 
-                        backgroundColor: 'var(--bg-secondary)', 
-                        border: '1px solid var(--border-color)', 
-                        color: 'var(--text-primary)' 
-                      }}
-                    >
-                      <option value="">RIR</option>
-                      <option value="0">0</option>
-                      <option value="1">1</option>
-                      <option value="2">2</option>
-                      <option value="3">3</option>
-                      <option value="4">4</option>
-                      <option value="5">5</option>
-                    </select>
-                  )}
-
-                  {/* 5. Checkmark Log Button */}
-                  <button
-                    type="button"
-                    onClick={() => updateSet(ex.exerciseId, idx, 'completed', !set.completed)}
-                    style={{
-                      height: '38px',
-                      borderRadius: '6px',
-                      border: '1px solid',
-                      borderColor: set.completed ? 'var(--success)' : 'var(--border-color)',
-                      backgroundColor: set.completed ? 'var(--success-glow)' : 'transparent',
-                      color: set.completed ? 'var(--success-strong)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'var(--transition)'
-                    }}
-                  >
-                    <Check size={16} strokeWidth={3} />
-                  </button>
-
-                  {/* 6. Remove Set */}
-                  <button 
-                    type="button"
-                    className="btn btn-secondary btn-icon-only btn-sm"
-                    style={{ width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderColor: 'transparent', background: 'none', padding: 0 }}
-                    onClick={() => removeSetFromActive(ex.exerciseId, idx)}
-                  >
-                    <Trash2 size={14} style={{ color: 'var(--text-muted)' }} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Add Set button */}
             <div className="exercise-controls">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => addSetToActive(ex.exerciseId)}
                 style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -604,22 +648,23 @@ export default function WorkoutActive({
         <form onSubmit={handleAddCustomExercise} className="card" style={{ gap: '14px' }}>
           <div className="card-title">
             <span>Add Custom Exercise</span>
-            <button 
-              type="button" 
+            <button
+              type="button"
               style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
               onClick={() => setShowAddCustom(false)}
+              aria-label="Close"
             >
               <X size={18} />
             </button>
           </div>
           <div className="form-group">
             <label htmlFor="custom-exercise-name">Exercise Name</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               id="custom-exercise-name"
-              className="form-input" 
+              className="form-input"
               placeholder="e.g. Incline DB Flyes"
-              value={customExerciseName} 
+              value={customExerciseName}
               onChange={(e) => setCustomExerciseName(e.target.value)}
               autoFocus
               required
@@ -627,20 +672,17 @@ export default function WorkoutActive({
           </div>
           <div className="form-group">
             <label htmlFor="custom-exercise-mg">Muscle Group</label>
-            <select 
+            <select
               id="custom-exercise-mg"
               className="form-input"
               value={customExerciseMG}
               onChange={(e) => setCustomExerciseMG(e.target.value)}
             >
-              <option value="Chest">Chest</option>
-              <option value="Shoulders">Shoulders</option>
-              <option value="Triceps">Triceps</option>
-              <option value="Lats">Lats</option>
-              <option value="Back">Back</option>
-              <option value="Legs">Legs</option>
-              <option value="Abs">Abs</option>
-              <option value="Other">Other</option>
+              {/* Shared list, so this picker can't drift from Settings again —
+                  it was the last place still offering the retired 'Legs'. */}
+              {SELECTABLE_MUSCLE_GROUPS.map((mg) => (
+                <option key={mg} value={mg}>{mg}</option>
+              ))}
             </select>
           </div>
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -653,9 +695,9 @@ export default function WorkoutActive({
           </div>
         </form>
       ) : (
-        <button 
-          className="btn btn-secondary" 
-          onClick={() => setShowAddCustom(true)} 
+        <button
+          className="btn btn-secondary"
+          onClick={() => setShowAddCustom(true)}
           style={{ borderStyle: 'dashed', background: 'transparent' }}
         >
           <Plus size={16} /> Add Custom Exercise on the Fly
@@ -663,100 +705,62 @@ export default function WorkoutActive({
       )}
 
       {/* Floating Rest Timer countdown panel */}
-      {restEndTime && (timerSeconds > 0 || isFlashing) && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '75px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'calc(100% - 32px)',
-            maxWidth: '448px',
-            backgroundColor: isFlashing ? 'var(--warning-glow)' : 'var(--bg-card)',
-            borderColor: isFlashing ? 'var(--warning)' : 'var(--border-color)',
-            borderWidth: '1px',
-            borderStyle: 'solid',
-            borderRadius: 'var(--radius-md)',
-            padding: '12px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-            zIndex: 999
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
-              <span className="text-xs text-bold" style={{
-                color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)',
-                whiteSpace: 'nowrap'
-              }}>
-                {isFlashing ? 'REST COMPLETE' : 'RESTING'}
-              </span>
-              <span className="magnitude" style={{ fontSize: '26px' }}>
-                {isFlashing ? '0:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => extendRestTimer(30)}
-                style={{ padding: '6px 10px', fontSize: '12px' }}
-              >
-                +30s
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger btn-sm"
-                onClick={clearRestTimer}
-                style={{ padding: '6px 10px', fontSize: '12px' }}
-              >
-                Skip
-              </button>
-            </div>
-          </div>
-
-          {/* The rule. It shortens; nothing rotates and nothing pulses. When the
-              interval is over it fills out in fox rather than vanishing. */}
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round((isFlashing ? 1 : restRemaining) * 100)}
-            aria-label="Rest remaining"
-            style={{ height: '2px', backgroundColor: 'var(--bg-secondary)', overflow: 'hidden' }}
-          >
-            <div style={{
-              height: '100%',
-              width: `${(isFlashing ? 1 : restRemaining) * 100}%`,
-              backgroundColor: isFlashing ? 'var(--warning)' : 'var(--text-primary)',
-              transition: 'width 0.5s linear'
-            }} />
-          </div>
-        </div>
+      {restEndTime && (
+        <RestPanel
+          restEndTime={restEndTime}
+          restTotalMs={restTotalMs}
+          extendRestTimer={extendRestTimer}
+          clearRestTimer={clearRestTimer}
+        />
       )}
 
-      {/* Confirm Workout Cancel Modal */}
+      {/* Confirm Workout Cancel */}
       {showCancelConfirm && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 style={{ margin: 0 }}>Discard Workout?</h3>
-            <p className="text-muted" style={{ margin: 0, fontSize: '14px', lineHeight: '1.4' }}>
-              Are you sure you want to discard this workout session? Your sets and logged weights will be permanently deleted.
-            </p>
-            <div className="modal-actions">
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowCancelConfirm(false)}>
-                No, Keep Training
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={() => {
-                cancelWorkout();
-                setShowCancelConfirm(false);
-              }}>
-                Yes, Discard
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Discard workout?"
+          confirmLabel="Yes, discard"
+          cancelLabel="Keep training"
+          onCancel={() => setShowCancelConfirm(false)}
+          onConfirm={() => {
+            cancelWorkout();
+            setShowCancelConfirm(false);
+          }}
+        >
+          Your sets and logged weights from this session will be permanently deleted.
+        </ConfirmDialog>
+      )}
+
+      {/* Finish with nothing ticked: there is nothing to save */}
+      {finishPrompt === 'empty' && (
+        <ConfirmDialog
+          title="Nothing logged yet"
+          confirmLabel="Discard workout"
+          cancelLabel="Keep training"
+          onCancel={() => setFinishPrompt(null)}
+          onConfirm={() => {
+            setFinishPrompt(null);
+            cancelWorkout();
+          }}
+        >
+          None of the sets are ticked, so there&apos;s nothing to save. Tap ✓ on
+          each set as you finish it — only ticked sets count toward your log.
+        </ConfirmDialog>
+      )}
+
+      {/* Finish with some sets still open */}
+      {finishPrompt === 'partial' && (
+        <ConfirmDialog
+          title={`Finish with ${completion.unlogged} ${completion.unlogged === 1 ? 'set' : 'sets'} unticked?`}
+          confirmLabel="Finish workout"
+          cancelLabel="Keep training"
+          tone="primary"
+          onCancel={() => setFinishPrompt(null)}
+          onConfirm={finishWorkout}
+        >
+          {completion.logged} of {completion.total} sets are ticked. Unticked sets are
+          kept as skipped and don&apos;t count toward volume, records or next
+          session&apos;s targets.
+        </ConfirmDialog>
       )}
     </div>
   );

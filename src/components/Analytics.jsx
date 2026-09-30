@@ -13,6 +13,7 @@ import {
   groupSessionsByWeek,
   getMondayOfDate,
   getStartOfDay,
+  orderExercisesByRoutines,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
 
@@ -30,10 +31,12 @@ const tooltipStyle = {
   fontSize: '12px'
 };
 
-export default function Analytics({ history, exercises }) {
+export default function Analytics({ history, exercises, routines = [] }) {
+  // Chips in session order (Push's exercises, then Legs'), history-only
+  // exercises after them.
   const displayExercises = useMemo(
-    () => getDisplayExercises(exercises, history),
-    [exercises, history]
+    () => getDisplayExercises(orderExercisesByRoutines(exercises, routines), history),
+    [exercises, routines, history]
   );
 
   // Per-exercise progression series, keyed by id (computed once per history change)

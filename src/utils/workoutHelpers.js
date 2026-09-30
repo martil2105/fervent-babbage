@@ -12,11 +12,48 @@ export const SELECTABLE_MUSCLE_GROUPS = [
   'Abs', 'Other'
 ];
 
-// Aggregation/display list. Keeps the retired 'Legs' value at the end so any
-// exercise tagged before the split still shows up in the dashboard breakdown
-// and balance chart instead of silently vanishing. Both consumers hide groups
-// with zero sets, so it costs nothing when unused.
+// Aggregation/display list. Keeps the retired 'Legs' value at the end as a
+// last resort: anything still tagged 'Legs' is first re-attributed by name
+// (see resolveMuscleGroup), and only a name that can't be classified lands
+// here — so it shows up rather than silently vanishing. Both consumers hide
+// groups with zero sets, so it costs nothing when unused.
 export const MUSCLE_GROUPS = [...SELECTABLE_MUSCLE_GROUPS, 'Legs'];
+
+// Name patterns for splitting the retired catch-all 'Legs' tag. Checked in
+// this order, so the more specific wins: "leg press calf raise" is calves,
+// "hip extension" is glutes, and only then does "extension" mean quads.
+const LEG_GROUP_PATTERNS = [
+  ['Calves', /\bcalf\b|\bcalves\b/i],
+  ['Hamstrings', /\bcurls?\b|hamstring|\brdl\b|romanian|stiff[\s-]*leg|good[\s-]*morning|nordic/i],
+  ['Glutes', /glute|hip[\s-]*thrust|hip[\s-]*extension|kick[\s-]*back|abduct|bridge/i],
+  ['Quads', /\bquad|leg[\s-]*press|extension|squat|lunge|\bhack\b|step[\s-]*up|sissy/i]
+];
+
+/**
+ * Best guess at which leg muscle an exercise trains, from its name and/or id
+ * ("Seated Leg Curl" → Hamstrings, 'leg-extension' → Quads). Returns null when
+ * nothing matches — callers decide the fallback rather than this guessing.
+ */
+export const inferLegMuscleGroup = (...labels) => {
+  const text = labels
+    .filter((l) => typeof l === 'string' && l)
+    .map((l) => l.replace(/[-_]+/g, ' '))
+    .join(' ');
+  if (!text) return null;
+  const hit = LEG_GROUP_PATTERNS.find(([, re]) => re.test(text));
+  return hit ? hit[0] : null;
+};
+
+/**
+ * The muscle group an exercise should be counted under. Identical to the
+ * stored tag, except the retired 'Legs' catch-all is split by exercise name so
+ * leg press and leg curl stop pooling into one bar. History is never rewritten
+ * for this — sessions logged under 'Legs' are re-attributed at read time.
+ */
+export const resolveMuscleGroup = (muscleGroup, name, id) => {
+  if (muscleGroup === 'Legs') return inferLegMuscleGroup(name, id) || 'Legs';
+  return muscleGroup || 'Other';
+};
 
 // Calculate volume load of a set: weight * reps (returns 0 for warmups)
 export const getSetVolume = (weight, reps, isWarmup = false) => {
@@ -172,7 +209,11 @@ export const groupSessionsByWeek = (sessions, exercisesList = []) => {
     session.exercises.forEach((ex) => {
       // Find muscle group
       const configEx = exercisesList.find(e => e.id === ex.exerciseId);
-      const mg = configEx?.muscleGroup || ex.muscleGroup || 'Other';
+      const mg = resolveMuscleGroup(
+        configEx?.muscleGroup || ex.muscleGroup,
+        configEx?.name || ex.name,
+        ex.exerciseId
+      );
 
       const workingSets = ex.sets ? ex.sets.filter(isCountableSet) : [];
       const vol = workingSets.reduce((sum, s) => sum + getSetVolume(s.weight, s.reps, false), 0);
@@ -234,27 +275,42 @@ export const calculateTrend = (currentVolume, previousVolume) => {
 };
 
 /**
- * Find the most recent completed session that logged a given exercise, and
- * return its working sets as a tidy [{ weight, reps }] list (warmups excluded).
- * Sessions are searched newest-first. Returns null when the exercise has never
- * been logged. Used to show "last time you did X" and to build the duel ghost.
+ * A set that was actually done — ticked off, warm-up or not. Sets from older
+ * data have no `completed` flag and count as done (see isCountableSet).
+ */
+const isLoggedSet = (set) => !!set && set.completed !== false;
+
+/** Whether an exercise entry in a session has at least one set that was done. */
+export const hasLoggedSets = (exerciseEntry) =>
+  Array.isArray(exerciseEntry?.sets) && exerciseEntry.sets.some(isLoggedSet);
+
+/**
+ * Find the most recent session in which an exercise was actually done, and
+ * return the sets that were done as a tidy [{ weight, reps }] list — working
+ * sets, or the warm-ups if nothing else was logged. Sessions are searched
+ * newest-first. Returns null when the exercise has never been logged.
+ *
+ * Unticked sets are skipped on purpose. A session saves every planned set,
+ * ticked or not, and the unticked ones still carry the weight that was
+ * prefilled — so counting them would report weights that were never lifted,
+ * and an exercise skipped entirely would pose as "last time".
  */
 export const getLastSessionSets = (exerciseId, sessions) => {
   if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return null;
   const sorted = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
   for (const session of sorted) {
-    const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
-    if (ex && ex.sets && ex.sets.length > 0) {
-      const working = ex.sets.filter((s) => !s.isWarmup);
-      const source = working.length > 0 ? working : ex.sets;
-      return {
-        timestamp: session.timestamp,
-        sets: source.map((s) => ({
-          weight: parseFloat(s.weight) || 0,
-          reps: parseInt(s.reps) || 0
-        }))
-      };
-    }
+    const ex = session.exercises?.find((e) => e.exerciseId === exerciseId);
+    const logged = (ex?.sets || []).filter(isLoggedSet);
+    if (logged.length === 0) continue;
+    const working = logged.filter((s) => !s.isWarmup);
+    const source = working.length > 0 ? working : logged;
+    return {
+      timestamp: session.timestamp,
+      sets: source.map((s) => ({
+        weight: parseFloat(s.weight) || 0,
+        reps: parseInt(s.reps) || 0
+      }))
+    };
   }
   return null;
 };
@@ -311,9 +367,15 @@ export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef, now)
       };
     } else {
       const rpeText = lastRpe !== null ? ` at RPE ${lastRpe}` : '';
+      // Name the exercise's own increment: a generic "+1 to +2.5 kg" is wrong
+      // advice on a machine that only moves in 5 kg plates.
+      const step = parseFloat(exerciseDef?.weightStep);
+      const stepText = step > 0
+        ? `Add ${formatWeight(step)} kg next time.`
+        : 'Try increasing weight by +1kg to +2.5kg.';
       return {
         type: 'weight',
-        text: `Excellent! Hit max reps (${targetMax}) on all working sets${rpeText}. Try increasing weight by +1kg to +2.5kg.`,
+        text: `Excellent! Hit max reps (${targetMax}) on all working sets${rpeText}. ${stepText}`,
         action: 'Increase Weight'
       };
     }
@@ -322,7 +384,7 @@ export const getProgressionSuggestion = (exerciseId, sessions, exerciseDef, now)
     const subTargetSetsCount = workingSets.filter(set => (parseInt(set.reps) || 0) < targetMax).length;
     return {
       type: 'reps',
-      text: `Focus on hitting the top rep range (${targetMax}) across all working sets. Push for more reps in the remaining ${subTargetSetsCount} set(s).`,
+      text: `Focus on hitting the top rep range (${targetMax}) across all working sets. Push for more reps in the remaining ${subTargetSetsCount} ${subTargetSetsCount === 1 ? 'set' : 'sets'}.`,
       action: 'Increase Reps'
     };
   }
@@ -727,9 +789,12 @@ export const getReferenceExerciseData = (exerciseId, sessions, now) => {
     if (ex && ex.sets && ex.sets.length > 0) return ex;
   }
 
+  // Latest session where the exercise was actually done. One skipped entirely
+  // (every set left unticked) is not a reference: its sets only hold the
+  // prefill, so judging progression against it would coach an imaginary lift.
   for (const session of sorted) {
     const ex = session.exercises?.find((e) => e.exerciseId === exerciseId);
-    if (ex && ex.sets && ex.sets.length > 0) return ex;
+    if (hasLoggedSets(ex)) return ex;
   }
 
   return null;
@@ -763,4 +828,109 @@ export const getDaysSinceRoutine = (sessions, routineId, now) => {
   const last = getRoutineLastTrained(sessions, routineId);
   if (last === null) return null;
   return Math.max(0, Math.floor((now - last) / 86400000));
+};
+
+/**
+ * This week's working volume so far, set against last week — compared at the
+ * same point in the week rather than against last week's finished total.
+ *
+ * Comparing a week in progress with a completed one reads "-100%" every Monday
+ * morning and only turns fair on Sunday night. Here the baseline is last week
+ * up to this same weekday and hour, so the trend is like for like from the
+ * first session of the week. `now` is passed in to keep this pure.
+ *
+ * Returns { thisWeek, lastWeekSoFar, lastWeekTotal, trend }, where each of the
+ * first three is { volume, sessions } and trend is calculateTrend(thisWeek,
+ * lastWeekSoFar).
+ */
+export const getWeekToDateComparison = (sessions, now) => {
+  const weekStart = getMondayOfDate(now).getTime();
+  const sameTimeLastWeek = new Date(now);
+  sameTimeLastWeek.setDate(sameTimeLastWeek.getDate() - 7);
+  const lastWeekStart = getMondayOfDate(sameTimeLastWeek).getTime();
+  const cutoff = sameTimeLastWeek.getTime();
+
+  const thisWeek = { volume: 0, sessions: 0 };
+  const lastWeekSoFar = { volume: 0, sessions: 0 };
+  const lastWeekTotal = { volume: 0, sessions: 0 };
+
+  (Array.isArray(sessions) ? sessions : []).forEach((session) => {
+    const monday = getMondayOfDate(session.timestamp).getTime();
+    const volume = getSessionVolume(session.exercises);
+    if (monday === weekStart) {
+      thisWeek.volume += volume;
+      thisWeek.sessions += 1;
+    } else if (monday === lastWeekStart) {
+      lastWeekTotal.volume += volume;
+      lastWeekTotal.sessions += 1;
+      if (session.timestamp <= cutoff) {
+        lastWeekSoFar.volume += volume;
+        lastWeekSoFar.sessions += 1;
+      }
+    }
+  });
+
+  return {
+    thisWeek,
+    lastWeekSoFar,
+    lastWeekTotal,
+    trend: calculateTrend(thisWeek.volume, lastWeekSoFar.volume)
+  };
+};
+
+/**
+ * Order exercises the way the sessions run them: every exercise of the first
+ * routine in session order, then the next routine's, and so on. Exercises in
+ * no routine keep their original relative order at the end.
+ *
+ * The library itself is stored by id, so without this every list in the app
+ * read alphabetically by id ("db-chest-press" before "db-shoulder-press")
+ * instead of in the order you actually train them.
+ */
+export const orderExercisesByRoutines = (exercises = [], routines = []) => {
+  const rank = new Map();
+  [...(routines || [])]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .forEach((routine) => {
+      (routine.exerciseIds || []).forEach((id) => {
+        if (!rank.has(id)) rank.set(id, rank.size);
+      });
+    });
+
+  return (exercises || [])
+    .map((ex, index) => ({ ex, index, rank: rank.has(ex.id) ? rank.get(ex.id) : Infinity }))
+    .sort((a, b) => (a.rank === b.rank ? a.index - b.index : a.rank - b.rank))
+    .map(({ ex }) => ex);
+};
+
+/**
+ * How much of an in-progress workout has been ticked off. Used to warn before
+ * finishing with sets still open, and to refuse saving a session with none.
+ * Returns { total, logged, unlogged }.
+ */
+export const getWorkoutCompletion = (workout) => {
+  let total = 0;
+  let logged = 0;
+  (workout?.exercises || []).forEach((ex) => {
+    (ex.sets || []).forEach((set) => {
+      total += 1;
+      if (set?.completed) logged += 1;
+    });
+  });
+  return { total, logged, unlogged: total - logged };
+};
+
+/**
+ * Parse what someone typed into a weight field. Accepts a comma as the decimal
+ * mark — an iPhone set to a Norwegian (or most European) region shows "," on
+ * the decimal keypad — and snaps to the half-kilo grid like every other weight.
+ *
+ * Returns { valid: false } for text that isn't a number in progress, or
+ * { valid: true, value } where value is '' for an empty field.
+ */
+export const parseWeightText = (raw) => {
+  const normalized = String(raw ?? '').replace(/\s+/g, '').replace(',', '.');
+  if (normalized === '' || normalized === '.') return { valid: true, value: '' };
+  if (!/^\d*\.?\d*$/.test(normalized)) return { valid: false };
+  return { valid: true, value: roundWeight(normalized) };
 };

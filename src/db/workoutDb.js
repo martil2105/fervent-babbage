@@ -1,23 +1,13 @@
 import Dexie from 'dexie';
+import { planLegsProgramV5 } from './legsMigration';
 
 export const db = new Dexie('HypertrophyTrainerDB');
 
-// Leg-day starter exercises. Deliberately small: two movements, two working
-// sets each. Higher rep ranges are kinder while the movement pattern is still
-// being learned, and both machines load in whole 5 kg jumps.
+// The leg day, in session order. Still deliberately small — three machines —
+// and array order *is* session order: hamstrings first, then quad isolation,
+// then the press to finish. Higher rep ranges are kinder while the movement
+// patterns are still being learned, and all three machines load in 5 kg jumps.
 export const LEG_EXERCISES = [
-  {
-    id: 'leg-press',
-    name: 'Leg Press',
-    targetSets: 2,
-    minReps: 10,
-    maxReps: 15,
-    isCustom: false,
-    muscleGroup: 'Quads',
-    exerciseType: 'compound',
-    restDuration: 150,
-    weightStep: 5
-  },
   {
     id: 'leg-curl',
     name: 'Seated Leg Curl',
@@ -28,6 +18,30 @@ export const LEG_EXERCISES = [
     muscleGroup: 'Hamstrings',
     exerciseType: 'isolation',
     restDuration: 90,
+    weightStep: 5
+  },
+  {
+    id: 'leg-extension',
+    name: 'Leg Extension',
+    targetSets: 3,
+    minReps: 10,
+    maxReps: 15,
+    isCustom: false,
+    muscleGroup: 'Quads',
+    exerciseType: 'isolation',
+    restDuration: 90,
+    weightStep: 5
+  },
+  {
+    id: 'leg-press',
+    name: 'Leg Press',
+    targetSets: 2,
+    minReps: 10,
+    maxReps: 15,
+    isCustom: false,
+    muscleGroup: 'Quads',
+    exerciseType: 'compound',
+    restDuration: 150,
     weightStep: 5
   }
 ];
@@ -93,6 +107,29 @@ db.version(4).stores({
     exerciseIds: LEG_EXERCISES.map((ex) => ex.id),
     order: 1
   });
+});
+
+// v5 — Leg day becomes Seated Leg Curl → Leg Extension → Leg Press, and the
+// retired 'Legs' tag is split into Quads / Hamstrings so analytics stops
+// pooling them. Schema is unchanged; this is a data-only step. The planning
+// lives in legsMigration.js as a pure function so it can be unit-tested
+// without IndexedDB. Existing leg press / leg curl settings are kept as-is.
+db.version(5).stores({
+  exercises: 'id, name, muscleGroup, exerciseType',
+  history: 'id, timestamp',
+  preferences: 'key',
+  routines: 'id, order'
+}).upgrade(async (tx) => {
+  const exercises = await tx.table('exercises').toArray();
+  const routines = await tx.table('routines').toArray();
+
+  const { exercisesToPut, routinesToPut } = planLegsProgramV5(exercises, routines, {
+    legSeed: LEG_EXERCISES,
+    legsRoutineId: LEGS_ROUTINE_ID
+  });
+
+  if (exercisesToPut.length) await tx.table('exercises').bulkPut(exercisesToPut);
+  if (routinesToPut.length) await tx.table('routines').bulkPut(routinesToPut);
 });
 
 // Seed default exercises when database is created for the first time.

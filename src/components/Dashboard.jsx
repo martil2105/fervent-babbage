@@ -3,29 +3,49 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { TrendingUp, TrendingDown, Minus, Info, BarChart2, Zap, ShieldAlert, X } from 'lucide-react';
 import {
   groupSessionsByWeek,
-  calculateTrend,
   getProgressionSuggestion,
   getMondayOfDate,
   getDisplayExercises,
   getAccretionSeries,
+  getWeekToDateComparison,
+  orderExercisesByRoutines,
+  resolveMuscleGroup,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
 import AccretionStrip from './AccretionStrip';
 import { isBackupDue, daysSinceBackup } from '../utils/autoBackup';
 
-export default function Dashboard({ history, exercises, lastBackupAt, exportData, hasBackupFolder }) {
+const formatKg = (kg) => `${Math.round(kg).toLocaleString()} kg`;
+
+// Text colour for each hint type. Text uses the -strong steps, which are the
+// ones that stay legible on the pale tints (Verdant: 500s are for fills and
+// icons only).
+const HINT_STYLE = {
+  weight: { border: 'var(--feather-200)', background: 'var(--success-glow)', icon: 'var(--success)', text: 'var(--success-strong)' },
+  hold: { border: 'var(--feather-200)', background: 'var(--accent-glow)', icon: 'var(--accent)', text: 'var(--accent-strong)' },
+  reps: { border: 'var(--fox-200)', background: 'var(--warning-glow)', icon: 'var(--warning)', text: 'var(--warning-strong)' },
+  initial: { border: 'var(--border-color)', background: 'var(--bg-secondary)', icon: 'var(--text-secondary)', text: 'var(--text-secondary)' }
+};
+
+export default function Dashboard({ history, exercises, routines = [], lastBackupAt, exportData, hasBackupFolder }) {
   const [breakdownView, setBreakdownView] = useState('muscleGroups'); // 'muscleGroups' | 'exercises'
   const [backupDismissed, setBackupDismissed] = useState(false);
+
+  // Session order (Push's exercises, then Legs'), not the library's id order.
+  const orderedExercises = useMemo(
+    () => orderExercisesByRoutines(exercises, routines),
+    [exercises, routines]
+  );
 
   // One walk of history per exercise, not one per render — the breakdown
   // toggles views often and each series re-sorts every session.
   const accretionByExercise = useMemo(() => {
     const map = {};
-    getDisplayExercises(exercises, history).forEach((ex) => {
+    getDisplayExercises(orderedExercises, history).forEach((ex) => {
       map[ex.id] = getAccretionSeries(ex.id, history);
     });
     return map;
-  }, [exercises, history]);
+  }, [orderedExercises, history]);
 
   // Stable clock read — react-compiler rejects Date.now() during render.
   const [nowTs] = useState(() => Date.now());
@@ -90,9 +110,9 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
 
   // 1. Group sessions by week
   const weeklyData = groupSessionsByWeek(history, exercises);
-  
-  // Get current week and previous week data
-  const currentWeekMonday = getMondayOfDate(new Date()).getTime();
+
+  // Get current week data
+  const currentWeekMonday = getMondayOfDate(nowTs).getTime();
   const currentWeekData = weeklyData.find(w => w.weekStart === currentWeekMonday) || {
     totalVolume: 0,
     sessionsCount: 0,
@@ -101,37 +121,52 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
     muscleGroupVolume: {},
     muscleGroupSets: {}
   };
-  
-  // Previous week Monday
-  const prevWeekMonday = currentWeekMonday - 7 * 24 * 60 * 60 * 1000;
-  const prevWeekData = weeklyData.find(w => w.weekStart === prevWeekMonday);
-  
-  const trend = calculateTrend(currentWeekData.totalVolume, prevWeekData?.totalVolume || 0);
+
+  // Like-for-like: this week so far against last week *up to the same point*.
+  // Against last week's finished total, every Monday read "-100%" in red.
+  const weekToDate = getWeekToDateComparison(history, nowTs);
+  const trend = weekToDate.trend;
 
   // Render trend badge
   const renderTrendBadge = () => {
+    // Nothing logged yet this week: not a decline, just early. Say where
+    // last week ended up instead of scoring a week that has barely started.
+    if (weekToDate.thisWeek.sessions === 0) {
+      return (
+        <span className="metric-trend-badge flat">
+          <Info size={14} />
+          {weekToDate.lastWeekTotal.sessions > 0
+            ? `Last week ${formatKg(weekToDate.lastWeekTotal.volume)}`
+            : 'No sessions yet this week'}
+        </span>
+      );
+    }
     if (trend.direction === 'up') {
       return (
-        <span className="metric-trend-badge up">
-          <TrendingUp size={14} /> +{trend.percentChange}% vs last week
+        <span className="metric-trend-badge up" title="Compared with last week up to the same day and time">
+          <TrendingUp size={14} /> +{trend.percentChange}% vs this point last week
         </span>
       );
     } else if (trend.direction === 'down') {
       return (
-        <span className="metric-trend-badge down">
-          <TrendingDown size={14} /> -{trend.percentChange}% vs last week
+        <span className="metric-trend-badge down" title="Compared with last week up to the same day and time">
+          <TrendingDown size={14} /> -{trend.percentChange}% vs this point last week
         </span>
       );
     } else if (trend.direction === 'flat') {
       return (
-        <span className="metric-trend-badge flat">
-          <Minus size={14} /> Flat vs last week
+        <span className="metric-trend-badge flat" title="Compared with last week up to the same day and time">
+          <Minus size={14} /> Level with this point last week
         </span>
       );
     }
+    // Trained this week, but nothing by this point last week to compare with
     return (
       <span className="metric-trend-badge flat">
-        <Info size={14} /> No previous week data
+        <Info size={14} />
+        {weekToDate.lastWeekTotal.sessions > 0
+          ? `Last week ${formatKg(weekToDate.lastWeekTotal.volume)}`
+          : 'No previous week data'}
       </span>
     );
   };
@@ -157,6 +192,14 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
     if (count <= 20) return 'Optimal Range (10-20)';
     return 'Excessive (Over 20)';
   };
+
+  // Groups your library actually trains stay listed even at zero sets, so an
+  // untouched one shows up as a gap; anything else appears once it has sets.
+  // (This used to be a fixed Chest/Shoulders/Triceps list from the push-only
+  // days, which hid Quads and Hamstrings at zero and kept an empty Triceps row.)
+  const trainedGroups = new Set(
+    exercises.map((ex) => resolveMuscleGroup(ex.muscleGroup, ex.name, ex.id))
+  );
 
   return (
     <div className="tab-content">
@@ -263,9 +306,8 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
               const vol = currentWeekData.muscleGroupVolume?.[mg] || 0;
               const targetClass = getSetCountTargetClass(count);
               
-              // Only render if sets are logged or if it's a core muscle group
-              const isCore = ['Chest', 'Shoulders', 'Triceps'].includes(mg);
-              if (count === 0 && !isCore) return null;
+              // Only render if sets are logged or the library trains this group
+              if (count === 0 && !trainedGroups.has(mg)) return null;
 
               return (
                 <div key={mg} className="weekly-breakdown-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
@@ -275,7 +317,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
                       <span className="text-xs text-muted">{getSetCountStatusLabel(count)}</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                      <span className="weekly-breakdown-vol" style={{ fontSize: '14px' }}>{Math.round(vol)} kg</span>
+                      <span className="weekly-breakdown-vol" style={{ fontSize: '14px' }}>{formatKg(vol)}</span>
                       <span className={`metric-trend-badge ${targetClass}`} style={{ marginTop: 0, fontSize: '10px', padding: '1px 6px' }}>
                         {count} hard set{count !== 1 ? 's' : ''}
                       </span>
@@ -298,7 +340,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
           </div>
         ) : (
           <div className="weekly-breakdown-table">
-            {getDisplayExercises(exercises, history).map((ex) => {
+            {getDisplayExercises(orderedExercises, history).map((ex) => {
               const vol = currentWeekData.exerciseVolume[ex.id] || 0;
               const sets = currentWeekData.exerciseSets[ex.id] || 0;
               // Hide history-only exercises with no activity this week to avoid clutter
@@ -310,7 +352,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
                       <span className="weekly-breakdown-name">{ex.name}</span>
                       <span className="weekly-breakdown-sets">{sets} hard set{sets !== 1 ? 's' : ''} logged</span>
                     </div>
-                    <span className="weekly-breakdown-vol">{Math.round(vol)} kg</span>
+                    <span className="weekly-breakdown-vol">{formatKg(vol)}</span>
                   </div>
                   <AccretionStrip points={accretionByExercise[ex.id]?.points} height={18} />
                 </div>
@@ -322,7 +364,7 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
 
       {/* 4. Progression Helper Suggestions */}
       <div className="card">
-        <h3 className="card-title" style={{ gap: '6px', display: 'flex', alignItems: 'center' }}>
+        <h3 className="card-title" style={{ gap: '6px', justifyContent: 'flex-start' }}>
           <Zap size={18} style={{ color: 'var(--warning-strong)' }} />
           Progression Helper
         </h3>
@@ -330,20 +372,19 @@ export default function Dashboard({ history, exercises, lastBackupAt, exportData
           Suggests weight increases only if you completed all working sets at the top rep range AND difficulty was moderate (last-set RPE ≤ 9 / RIR ≥ 1).
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
-          {exercises.map((ex) => {
-            const suggestion = getProgressionSuggestion(ex.id, history, ex);
+          {orderedExercises.map((ex) => {
+            // Same clock as the workout screen passes, so after a layoff both
+            // judge against the same session instead of disagreeing.
+            const suggestion = getProgressionSuggestion(ex.id, history, ex, nowTs);
+            const tone = HINT_STYLE[suggestion.type] || HINT_STYLE.initial;
             return (
               <div key={ex.id} className="progression-hint-banner" style={{
-                borderColor: suggestion.type === 'weight' ? 'var(--feather-200)' : suggestion.type === 'hold' ? 'var(--feather-200)' : suggestion.type === 'reps' ? 'var(--fox-200)' : 'var(--border-color)',
-                backgroundColor: suggestion.type === 'weight' ? 'var(--success-glow)' : suggestion.type === 'hold' ? 'var(--accent-glow)' : suggestion.type === 'reps' ? 'var(--warning-glow)' : 'var(--bg-secondary)'
+                borderColor: tone.border,
+                backgroundColor: tone.background
               }}>
-                <Info size={16} className="progression-hint-icon" style={{
-                  color: suggestion.type === 'weight' ? 'var(--success)' : suggestion.type === 'hold' ? 'var(--accent)' : suggestion.type === 'reps' ? 'var(--warning)' : 'var(--text-secondary)'
-                }} />
-                <div className="progression-hint-text">
-                  <strong style={{
-                    color: suggestion.type === 'weight' ? 'var(--success)' : suggestion.type === 'hold' ? 'var(--accent)' : suggestion.type === 'reps' ? 'var(--warning)' : 'var(--text-secondary)'
-                  }}>{ex.name}: </strong>
+                <Info size={16} className="progression-hint-icon" style={{ color: tone.icon }} />
+                <div className="progression-hint-text" style={{ color: tone.text }}>
+                  <strong style={{ color: tone.text }}>{ex.name}: </strong>
                   {suggestion.text}
                 </div>
               </div>

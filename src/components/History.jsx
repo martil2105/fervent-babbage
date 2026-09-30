@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { Calendar, Clock, Trophy, ChevronDown, ChevronUp, Pencil, Plus, Trash2, Check, X } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import WeightInput from './WeightInput';
 import {
   formatDate,
+  formatWeight,
   getSessionVolume,
   getExerciseVolume,
   getPersonalBests,
   getDisplayExercises,
+  orderExercisesByRoutines,
   SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
 
@@ -21,9 +25,11 @@ const toLocalInputValue = (ts) => {
 // as logged (completed: true) since the edit is describing what really happened.
 const emptySet = () => ({ weight: 0, reps: 0, isWarmup: false, completed: true, rpe: null, rir: null });
 
-export default function History({ history, exercises, updateHistorySession }) {
+export default function History({ history, exercises, routines = [], updateHistorySession, deleteHistorySession }) {
   const [activeSubTab, setActiveSubTab] = useState('logs'); // 'logs' | 'pbs'
   const [expandedSessionId, setExpandedSessionId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Editing state: which session is in edit mode, plus a local draft the
   // inputs write into. Nothing touches the DB until Save.
@@ -54,6 +60,19 @@ export default function History({ history, exercises, updateHistorySession }) {
   const cancelEdit = () => {
     setEditingSessionId(null);
     setDraft(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDeleteId || !deleteHistorySession) return;
+    setDeleting(true);
+    try {
+      await deleteHistorySession(confirmDeleteId);
+      if (editingSessionId === confirmDeleteId) cancelEdit();
+      if (expandedSessionId === confirmDeleteId) setExpandedSessionId(null);
+      setConfirmDeleteId(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -172,14 +191,24 @@ export default function History({ history, exercises, updateHistorySession }) {
   // 2. Fetch personal bests
   const pbs = getPersonalBests(history);
 
+  // Library in session order (Push's exercises, then Legs') for the pickers
+  // and the Personal Bests list.
+  const orderedExercises = orderExercisesByRoutines(exercises, routines);
+
   // Config exercises not already in the draft (for the "add exercise" picker)
   const addableExercises = draft
-    ? exercises.filter((ex) => !draft.exercises.some((d) => d.exerciseId === ex.id))
+    ? orderedExercises.filter((ex) => !draft.exercises.some((d) => d.exerciseId === ex.id))
     : [];
+
+  const sessionPendingDelete = confirmDeleteId
+    ? history.find((s) => s.id === confirmDeleteId)
+    : null;
   const draftHasSets = draft && draft.exercises.some((ex) => ex.sets.length > 0);
 
   const compactInputStyle = {
     height: '34px',
+    width: '100%',
+    minWidth: 0, // text inputs have a wide intrinsic size; let the grid decide
     textAlign: 'center',
     padding: '0 4px',
     fontSize: '14px'
@@ -244,7 +273,7 @@ export default function History({ history, exercises, updateHistorySession }) {
                         <Clock size={12} /> {session.duration || 0}m
                       </span>
                       <span>•</span>
-                      <span>{session.exercises.length} Exercises</span>
+                      <span>{session.exercises.length} {session.exercises.length === 1 ? 'Exercise' : 'Exercises'}</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -287,7 +316,7 @@ export default function History({ history, exercises, updateHistorySession }) {
                                   title={set.isWarmup ? 'Warm-up (not counted)' : skipped ? 'Not logged (not counted)' : undefined}
                                   style={set.isWarmup || skipped ? { opacity: 0.5, fontStyle: 'italic' } : undefined}
                                 >
-                                  S{sIdx + 1}: {set.weight}kg × {set.reps}
+                                  S{sIdx + 1}: {formatWeight(set.weight)}kg × {set.reps}
                                   {set.isWarmup ? ' · W' : skipped ? ' · skipped' : ''}
                                 </span>
                               );
@@ -355,7 +384,7 @@ export default function History({ history, exercises, updateHistorySession }) {
                         {/* Column labels */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '44px 1fr 1fr 34px 24px',
+                          gridTemplateColumns: '44px minmax(0, 1fr) minmax(0, 1fr) 34px 24px',
                           gap: '6px',
                           fontSize: '10px',
                           color: 'var(--text-secondary)',
@@ -374,7 +403,7 @@ export default function History({ history, exercises, updateHistorySession }) {
                           {ex.sets.map((set, setIdx) => (
                             <div key={setIdx} style={{
                               display: 'grid',
-                              gridTemplateColumns: '44px 1fr 1fr 34px 24px',
+                              gridTemplateColumns: '44px minmax(0, 1fr) minmax(0, 1fr) 34px 24px',
                               gap: '6px',
                               alignItems: 'center'
                             }}>
@@ -398,16 +427,13 @@ export default function History({ history, exercises, updateHistorySession }) {
                                 {set.isWarmup ? 'WARM' : 'WORK'}
                               </button>
 
-                              {/* Weight */}
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                min="0"
-                                step="0.5"
+                              {/* Weight — accepts "27,5" as well as "27.5" */}
+                              <WeightInput
                                 className="form-input"
                                 style={compactInputStyle}
                                 value={set.weight}
-                                onChange={(e) => updateDraftSet(exIdx, setIdx, 'weight', e.target.value)}
+                                onChange={(value) => updateDraftSet(exIdx, setIdx, 'weight', value)}
+                                aria-label={`${ex.name} set ${setIdx + 1} weight, kg`}
                               />
 
                               {/* Reps */}
@@ -525,8 +551,18 @@ export default function History({ history, exercises, updateHistorySession }) {
                       )}
                     </div>
 
-                    {/* Save / Cancel */}
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
+                    {/* Delete / Cancel / Save */}
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center', marginTop: '12px' }}>
+                      {deleteHistorySession && (
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          style={{ marginRight: 'auto' }}
+                          onClick={() => setConfirmDeleteId(session.id)}
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      )}
                       <button type="button" className="btn btn-secondary btn-sm" onClick={cancelEdit}>
                         Cancel
                       </button>
@@ -551,7 +587,7 @@ export default function History({ history, exercises, updateHistorySession }) {
       {/* SUB-TAB: Personal Bests */}
       {activeSubTab === 'pbs' && (
         <div className="pb-list">
-          {getDisplayExercises(exercises, history).map((ex) => {
+          {getDisplayExercises(orderedExercises, history).map((ex) => {
             const pb = pbs[ex.id] || { maxWeight: 0, maxSessionVolume: 0 };
             return (
               <div key={ex.id} className="pb-item">
@@ -579,7 +615,7 @@ export default function History({ history, exercises, updateHistorySession }) {
                   {pb.maxWeight > 0 ? (
                     <>
                       <span className="pb-weight">
-                        {pb.maxWeight} kg
+                        {formatWeight(pb.maxWeight)} kg
                       </span>
                       <span className="pb-volume">
                         Max Vol: {Math.round(pb.maxSessionVolume)} kg
@@ -595,6 +631,20 @@ export default function History({ history, exercises, updateHistorySession }) {
             );
           })}
         </div>
+      )}
+
+      {sessionPendingDelete && (
+        <ConfirmDialog
+          title="Delete this session?"
+          confirmLabel="Delete session"
+          busy={deleting}
+          onCancel={() => setConfirmDeleteId(null)}
+          onConfirm={confirmDelete}
+        >
+          {sessionPendingDelete.routineName ? `${sessionPendingDelete.routineName} · ` : ''}
+          {formatDate(sessionPendingDelete.timestamp)} will be removed from your history,
+          records and analytics. This can&apos;t be undone — unless it&apos;s in a backup.
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -1,8 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, LEG_EXERCISES, PUSH_ROUTINE_ID, LEGS_ROUTINE_ID } from '../db/workoutDb';
 import { ensurePersistentStorage } from '../utils/storagePersistence';
-import { getAllTimeBest, isBestStale, roundWeight } from '../utils/workoutHelpers';
+import {
+  getAllTimeBest,
+  getLastSessionSets,
+  isBestStale,
+  roundWeight
+} from '../utils/workoutHelpers';
+import { retagLegsExercise } from '../db/legsMigration';
+import { parseBackup, saveBackupFile, backupFileName } from '../utils/backupFile';
 import {
   pickBackupFolder,
   writeBackup,
@@ -14,6 +21,33 @@ import {
 // preferences table so it survives restarts, but it must never be written into
 // an export payload — JSON.stringify would silently turn it into `{}`.
 const BACKUP_HANDLE_KEY = 'backupFolderHandle';
+
+// localStorage keys for the in-progress session. The workout itself lives here
+// rather than in IndexedDB until it's finished; App reads the first key to
+// reopen on the Workout tab after the browser has killed the page.
+export const CURRENT_WORKOUT_KEY = 'hypertrophy_current_workout';
+const REST_END_KEY = 'hypertrophy_rest_end_time';
+const REST_TOTAL_KEY = 'hypertrophy_rest_total_ms';
+
+// Read a JSON value from localStorage without letting a corrupt entry take the
+// whole app down on startup (JSON.parse throws, and this runs during render).
+const readStoredJson = (key) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const readStoredInt = (key) => {
+  try {
+    const n = parseInt(localStorage.getItem(key), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+};
 
 const toPlainPreferences = (entries) => {
   const prefs = {};
@@ -108,49 +142,47 @@ export const useWorkoutState = () => {
 
   // 2. LocalStorage for transient/active session data (Refreshes safe)
   const [currentWorkout, setCurrentWorkout] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_current_workout');
-    return saved ? JSON.parse(saved) : null;
+    const saved = readStoredJson(CURRENT_WORKOUT_KEY);
+    return saved && Array.isArray(saved.exercises) ? saved : null;
   });
 
-  const [restEndTime, setRestEndTime] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_rest_end_time');
-    return saved ? parseInt(saved) : null;
-  });
+  const [restEndTime, setRestEndTime] = useState(() => readStoredInt(REST_END_KEY));
 
   // How long the current rest interval is, so the UI can show elapsed as a
   // proportion rather than a bare countdown. Persisted alongside the end time —
   // without it a reload mid-rest would have no denominator.
-  const [restTotalMs, setRestTotalMs] = useState(() => {
-    const saved = localStorage.getItem('hypertrophy_rest_total_ms');
-    return saved ? parseInt(saved) : 0;
-  });
+  const [restTotalMs, setRestTotalMs] = useState(() => readStoredInt(REST_TOTAL_KEY) || 0);
 
   // Durable-storage status: null = unknown/not yet checked, true = persisted,
   // false = best-effort (browser may evict under disk pressure).
   const [storagePersisted, setStoragePersisted] = useState(null);
 
+  // Set while a finished workout is being written, so a second tap on Finish
+  // can't save it twice.
+  const completingRef = useRef(false);
+
   // Keep transient data saved
   useEffect(() => {
     if (currentWorkout) {
-      localStorage.setItem('hypertrophy_current_workout', JSON.stringify(currentWorkout));
+      localStorage.setItem(CURRENT_WORKOUT_KEY, JSON.stringify(currentWorkout));
     } else {
-      localStorage.removeItem('hypertrophy_current_workout');
+      localStorage.removeItem(CURRENT_WORKOUT_KEY);
     }
   }, [currentWorkout]);
 
   useEffect(() => {
     if (restEndTime) {
-      localStorage.setItem('hypertrophy_rest_end_time', restEndTime.toString());
+      localStorage.setItem(REST_END_KEY, restEndTime.toString());
     } else {
-      localStorage.removeItem('hypertrophy_rest_end_time');
+      localStorage.removeItem(REST_END_KEY);
     }
   }, [restEndTime]);
 
   useEffect(() => {
     if (restTotalMs) {
-      localStorage.setItem('hypertrophy_rest_total_ms', restTotalMs.toString());
+      localStorage.setItem(REST_TOTAL_KEY, restTotalMs.toString());
     } else {
-      localStorage.removeItem('hypertrophy_rest_total_ms');
+      localStorage.removeItem(REST_TOTAL_KEY);
     }
   }, [restTotalMs]);
 
@@ -328,13 +360,14 @@ export const useWorkoutState = () => {
   };
 
   const extendRestTimer = (seconds) => {
-    setRestEndTime((prev) => {
-      const base = prev && prev > Date.now() ? prev : Date.now();
-      return base + seconds * 1000;
-    });
-    // Extending lengthens the interval, so the rule refills rather than
-    // overflowing past full.
-    setRestTotalMs((prev) => prev + seconds * 1000);
+    const nowMs = Date.now();
+    const expired = !restEndTime || restEndTime <= nowMs;
+    setRestEndTime((expired ? nowMs : restEndTime) + seconds * 1000);
+    // Extending a running rest lengthens the interval, so the rule refills
+    // rather than overflowing past full. After it has run out, +30s is a new
+    // 30-second interval — adding to the spent total would start the rule
+    // nearly empty.
+    setRestTotalMs(expired ? seconds * 1000 : restTotalMs + seconds * 1000);
   };
 
   const clearRestTimer = () => {
@@ -342,38 +375,21 @@ export const useWorkoutState = () => {
     setRestTotalMs(0);
   };
 
-  // Helper: heaviest working weight from the most recent session containing
-  // this exercise. Previously this returned the *first* working set, which on a
-  // ramped session (40 → 45 → 50) prefilled the warm-up-ish opener rather than
-  // what was actually worked. Returns null when there is nothing logged, so
+  // Helper: heaviest weight from the most recent session in which this
+  // exercise was actually done. Built on getLastSessionSets, which ignores
+  // unticked sets — they still hold the prefilled weight, so an exercise that
+  // was skipped used to pose as "last time" and seed the next prefill with a
+  // weight that had never been lifted. Returns null when nothing is logged, so
   // callers can distinguish "no history" from "lifted 0 kg".
   const getLastLoggedWeight = (exerciseId) => {
-    // History is already sorted newest to oldest from the Dexie live query!
-    for (const session of history) {
-      const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
-      if (ex && ex.sets && ex.sets.length > 0) {
-        const workingSets = ex.sets.filter((s) => !s.isWarmup);
-        const source = workingSets.length > 0 ? workingSets : ex.sets;
-        const weights = source.map((s) => parseFloat(s.weight) || 0);
-        return weights.length > 0 ? Math.max(...weights) : null;
-      }
-    }
-    return null;
+    const last = getLastSessionSets(exerciseId, history);
+    return last ? Math.max(...last.sets.map((s) => s.weight)) : null;
   };
 
-  // Helper: Find the last reps logged for an exercise
+  // Helper: reps of each set that was done last time, in order
   const getLastLoggedReps = (exerciseId) => {
-    for (const session of history) {
-      const ex = session.exercises.find((e) => e.exerciseId === exerciseId);
-      if (ex && ex.sets && ex.sets.length > 0) {
-        const workingSets = ex.sets.filter(s => !s.isWarmup);
-        if (workingSets.length > 0) {
-          return workingSets.map(s => parseInt(s.reps) || 0);
-        }
-        return ex.sets.map(s => parseInt(s.reps) || 0);
-      }
-    }
-    return null;
+    const last = getLastSessionSets(exerciseId, history);
+    return last ? last.sets.map((s) => s.reps) : null;
   };
 
   // Start a new workout session for a routine.
@@ -461,11 +477,23 @@ export const useWorkoutState = () => {
     clearRestTimer();
   };
 
-  // Complete current workout
+  // Complete current workout. Returns the saved session, or null when there
+  // was nothing to save or a save is already running (a double tap on Finish
+  // used to write the same session twice and fail on the duplicate id). If
+  // the database write throws, the workout stays open and the error goes to
+  // the caller.
   const completeWorkout = async () => {
-    if (!currentWorkout) return;
+    if (!currentWorkout || completingRef.current) return null;
+    completingRef.current = true;
+    try {
+      return await saveCompletedWorkout(currentWorkout);
+    } finally {
+      completingRef.current = false;
+    }
+  };
 
-    const sanitizedExercises = currentWorkout.exercises.map((ex) => ({
+  const saveCompletedWorkout = async (workout) => {
+    const sanitizedExercises = workout.exercises.map((ex) => ({
       ...ex,
       sets: ex.sets.map((set) => {
         let finalRpe = set.rpe !== '' && set.rpe !== null ? parseFloat(set.rpe) : null;
@@ -489,11 +517,11 @@ export const useWorkoutState = () => {
     })).filter(ex => ex.sets.length > 0);
 
     const completedSession = {
-      id: currentWorkout.id,
+      id: workout.id,
       timestamp: Date.now(),
-      duration: Math.round((Date.now() - currentWorkout.startTime) / 1000 / 60),
-      routineId: currentWorkout.routineId || null,
-      routineName: currentWorkout.routineName || null,
+      duration: Math.round((Date.now() - workout.startTime) / 1000 / 60),
+      routineId: workout.routineId || null,
+      routineName: workout.routineName || null,
       exercises: sanitizedExercises
     };
 
@@ -504,7 +532,8 @@ export const useWorkoutState = () => {
 
     // Finishing a workout is the natural checkpoint: the data just changed and
     // we're inside a user gesture, which is when file writes are permitted.
-    maybeAutoBackup();
+    // Best-effort — a failed backup must never look like a failed save.
+    maybeAutoBackup().catch((err) => console.warn('Automatic backup failed:', err));
 
     return completedSession;
   };
@@ -520,7 +549,8 @@ export const useWorkoutState = () => {
         .map((ex) => ({
           ...ex,
           sets: ex.sets.map((set) => ({
-            weight: parseFloat(set.weight) || 0,
+            // Same half-kilo grid as live logging, so an edit can't store 12.3
+            weight: roundWeight(set.weight),
             reps: parseInt(set.reps) || 0,
             isWarmup: !!set.isWarmup,
             completed: !!set.completed,
@@ -543,59 +573,57 @@ export const useWorkoutState = () => {
     await db.history.update(sessionId, changes);
   };
 
-  // Edit active workout sets
+  // Remove a session from history entirely — for a test session, a duplicate,
+  // or one finished by accident. The UI confirms before calling this.
+  const deleteHistorySession = async (sessionId) => {
+    await db.history.delete(sessionId);
+  };
+
+  // Edit active workout sets.
+  //
+  // Whether ticking this set should start the rest timer is decided up front
+  // from the rendered state, not inside the setState updater: React may defer
+  // an updater until the next render (always, once another update is queued in
+  // the same tick) and may run it twice in StrictMode, so a flag written from
+  // inside it was read before it was set. The updater itself stays pure.
   const updateSet = (exerciseId, setIndex, field, value) => {
     if (!currentWorkout) return;
 
-    let shouldStartTimer = false;
-    let timerDuration = 90;
+    const activeEx = currentWorkout.exercises.find((ex) => ex.exerciseId === exerciseId);
+    const target = activeEx?.sets?.[setIndex];
+    const startsRest = field === 'completed' && value === true && !!target && !target.completed;
+    const configEx = exercises.find((e) => e.id === exerciseId);
+    const restSeconds = activeEx?.restDuration || configEx?.restDuration ||
+      (activeEx?.exerciseType === 'isolation' ? 90 : 120);
+    const completedAt = field === 'completed' ? (value === true ? Date.now() : null) : undefined;
 
-    setCurrentWorkout((prev) => {
-      const updatedExercises = prev.exercises.map((ex) => {
+    let val = value;
+    if (field === 'reps') {
+      val = value === '' ? '' : parseInt(value) || 0;
+    } else if (field === 'rpe') {
+      val = value === '' ? '' : parseFloat(value);
+    } else if (field === 'rir') {
+      val = value === '' ? '' : parseInt(value);
+    }
+
+    setCurrentWorkout((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex) => {
         if (ex.exerciseId !== exerciseId) return ex;
-
-        const configEx = exercises.find(e => e.id === exerciseId);
-        timerDuration = ex.restDuration || configEx?.restDuration || (ex.exerciseType === 'isolation' ? 90 : 120);
-
-        const updatedSets = ex.sets.map((set, idx) => {
-          if (idx !== setIndex) return set;
-          
-          let val = value;
-          if (field === 'weight') {
-            val = value === '' ? '' : value;
-          } else if (field === 'reps') {
-            val = value === '' ? '' : parseInt(value) || 0;
-          } else if (field === 'rpe') {
-            val = value === '' ? '' : parseFloat(value);
-          } else if (field === 'rir') {
-            val = value === '' ? '' : parseInt(value);
-          }
-
-          if (field === 'completed' && value === true && !set.completed) {
-            shouldStartTimer = true;
-          }
-
-          return {
-            ...set,
-            [field]: val,
-            completedAt: field === 'completed' && value === true ? Date.now() : set.completedAt
-          };
-        });
-
         return {
           ...ex,
-          sets: updatedSets
+          sets: ex.sets.map((set, idx) => {
+            if (idx !== setIndex) return set;
+            return completedAt === undefined
+              ? { ...set, [field]: val }
+              : { ...set, [field]: val, completedAt };
+          })
         };
-      });
+      })
+    }));
 
-      return {
-        ...prev,
-        exercises: updatedExercises
-      };
-    });
-
-    if (shouldStartTimer) {
-      startRestTimer(timerDuration);
+    if (startsRest) {
+      startRestTimer(restSeconds);
     }
   };
 
@@ -662,13 +690,16 @@ export const useWorkoutState = () => {
     const newExercise = {
       exerciseId: id,
       name: name.trim(),
+      // Blank weight rather than an invented 10 kg — same rule as the prefill
+      // for library exercises with no history.
       sets: [
-        { weight: 10, reps: 10, completed: false, isWarmup: false, rpe: '', rir: '', completedAt: null }
+        { weight: '', reps: 10, completed: false, isWarmup: false, rpe: '', rir: '', completedAt: null }
       ],
       targetRange: { min: 8, max: 12 },
       muscleGroup,
       exerciseType: 'compound',
-      restDuration: 120
+      restDuration: 120,
+      weightStep: defaultWeightStep('compound')
     };
 
     setCurrentWorkout((prev) => ({
@@ -773,33 +804,52 @@ export const useWorkoutState = () => {
     });
   };
 
-  // Export data as JSON
-  const exportData = () => {
+  // Export data as JSON.
+  //
+  // Built from the in-memory copies rather than a fresh database read: on iOS
+  // the share sheet only opens straight from the tap, and an await on
+  // IndexedDB first can cost the gesture. The file goes out through the share
+  // sheet on phones ("Save to Files") and as a plain download elsewhere — the
+  // old data: URI link did nothing reliable in an iOS home-screen app while
+  // still stamping "backed up", which silenced the warning with no file saved.
+  // Returns 'shared' | 'downloaded' | 'cancelled'.
+  const exportData = async () => {
     const plainPrefs = toPlainPreferences(
       Object.entries(preferences).map(([key, value]) => ({ key, value }))
     );
     const dataStr = JSON.stringify({ exercises, history, preferences: plainPrefs, routines });
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    const exportFileDefaultName = `hypertrophy_tracker_backup_${new Date().toISOString().split('T')[0]}.json`;
 
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
-    linkElement.click();
+    const result = await saveBackupFile(dataStr, backupFileName(new Date()));
 
-    // Remember when the last backup was taken so Settings can nudge if stale.
-    db.preferences.put({ key: 'lastBackupAt', value: Date.now() });
+    // Remember when the last backup was taken so the Dashboard can nudge when
+    // it goes stale — but not when the share sheet was dismissed unsaved.
+    if (result !== 'cancelled') {
+      await db.preferences.put({ key: 'lastBackupAt', value: Date.now() });
+    }
+    return result;
   };
 
-  // Import data from JSON into IndexedDB
+  // Import a backup into IndexedDB, replacing what's there. Accepts JSON text
+  // or an object; either way it is validated by parseBackup first, so a file
+  // that isn't a backup (or `{}`) is rejected instead of "succeeding" while
+  // quietly wiping nothing — or half the log. The write is one transaction:
+  // it lands completely or not at all.
   const importData = async (jsonData) => {
     try {
-      const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      
+      const checked = parseBackup(jsonData);
+      if (!checked.ok) {
+        console.error('Backup rejected:', checked.error);
+        return false;
+      }
+      const parsed = checked.data;
+
       await db.transaction('rw', [db.exercises, db.history, db.preferences, db.routines], async () => {
         if (parsed.exercises && Array.isArray(parsed.exercises)) {
           await db.exercises.clear();
-          await db.exercises.bulkAdd(parsed.exercises);
+          // Backups from before the quads/hamstrings split may carry the
+          // retired 'Legs' tag; relabel on the way in so Settings shows the
+          // real group. Nothing else about the backup is altered.
+          await db.exercises.bulkAdd(parsed.exercises.map(retagLegsExercise));
         }
         if (parsed.history && Array.isArray(parsed.history)) {
           await db.history.clear();
@@ -851,9 +901,9 @@ export const useWorkoutState = () => {
       await db.routines.bulkAdd(DEFAULT_ROUTINES);
       await db.preferences.add({ key: 'prefLoggingMode', value: 'RPE' });
     });
-    localStorage.removeItem('hypertrophy_current_workout');
-    localStorage.removeItem('hypertrophy_rest_end_time');
-    localStorage.removeItem('hypertrophy_rest_total_ms');
+    localStorage.removeItem(CURRENT_WORKOUT_KEY);
+    localStorage.removeItem(REST_END_KEY);
+    localStorage.removeItem(REST_TOTAL_KEY);
     setCurrentWorkout(null);
     clearRestTimer();
   };
@@ -874,6 +924,7 @@ export const useWorkoutState = () => {
     cancelWorkout,
     completeWorkout,
     updateHistorySession,
+    deleteHistorySession,
     updateSet,
     addSetToActive,
     removeSetFromActive,

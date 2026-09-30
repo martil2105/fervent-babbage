@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Scratch space for files that can't be deleted from inside the sandboxed
+# editor, and the config bundles Vite leaves behind when a build is
+# interrupted. Neither belongs in the repo.
+_to_delete/
+*.timestamp-*.mjs
