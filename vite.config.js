@@ -14,11 +14,11 @@ export default defineConfig({
         name: 'Hypertrophy Log',
         short_name: 'HypLog',
         description: 'Track your hypertrophy training sessions offline.',
-        // Verdant light theme: --surface-canvas (#F7F8FA), same value as the
-        // theme-color meta tag in index.html. Keep the two in sync — these
-        // drive the PWA splash screen and the mobile browser status bar.
-        theme_color: '#F7F8FA',
-        background_color: '#F7F8FA',
+        // The light canvas (--canvas in src/theme/tokens.css), same value as
+        // the light theme-color meta tag in index.html. Keep them in sync —
+        // these drive the PWA splash screen and the browser bar.
+        theme_color: '#F1F2F4',
+        background_color: '#F1F2F4',
         display: 'standalone',
         orientation: 'portrait',
         // Real PNGs at the sizes they claim. The maskable one keeps the mark
@@ -46,7 +46,8 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+        // woff2: the self-hosted Archivo font, so the app looks right offline
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}']
       }
     })
   ]

@@ -1008,7 +1008,7 @@ export const summarizeSets = (sets) => {
   const body = weights.every((w) => w === weights[0])
     ? `${weights[0]} kg × ${reps.join(', ')}`
     : working.map((s, i) => `${weights[i]}×${reps[i]}`).join(', ');
-  return warmText ? `${body} · +${warmText}` : body;
+  return warmText ? `${body}, plus ${warmText}` : body;
 };
 
 /**

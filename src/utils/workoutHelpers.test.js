@@ -925,7 +925,7 @@ describe('summarizeSets', () => {
     expect(summarizeSets([set(25, 12), set(27.5, 10)])).toBe('25×12, 27.5×10');
   });
   it('ignores unticked sets and mentions warm-ups', () => {
-    expect(summarizeSets([warmup(10, 15), set(30, 10), set(30, 9, { completed: false })])).toBe('30 kg × 10 · +1 warm-up');
+    expect(summarizeSets([warmup(10, 15), set(30, 10), set(30, 9, { completed: false })])).toBe('30 kg × 10, plus 1 warm-up');
     expect(summarizeSets([warmup(10, 15), warmup(15, 10)])).toBe('2 warm-ups');
     expect(summarizeSets([])).toBe('No sets logged');
   });

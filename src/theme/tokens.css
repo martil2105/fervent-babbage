@@ -1,0 +1,176 @@
+/* Chalk, Iron, Brass — the HYPERTROPHY.LOG design tokens.
+ *
+ * Light is chalk and iron: cool porcelain canvas, white surfaces, iron ink.
+ * Dark is a true-black canvas (an OLED phone switches those pixels off) with
+ * iron surfaces and chalk ink. Brass is the one colour, and it is earned: a
+ * ticked set, a record, progress, the primary data series. Everything else is
+ * neutral, so the brass means something wherever it appears.
+ *
+ * Both themes are designed, not flipped: each step is chosen for its own
+ * surface and checked for contrast (text ≥ 4.5:1 where it carries meaning).
+ * Chart series were validated with the dataviz palette checker in both modes.
+ */
+
+/* Archivo by Omnibus-Type, SIL Open Font License 1.1 (see
+ * src/assets/fonts/Archivo-OFL.txt). One variable file carries every weight
+ * and width, and it is bundled, so the app looks the same offline. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  src: url('../assets/fonts/archivo-variable-latin.woff2') format('woff2-variations'),
+       url('../assets/fonts/archivo-variable-latin.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- Type ------------------------------------------------------------ */
+  --font-sans: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --stretch-figure: 76%;   /* condensed figures: kg, reps, times */
+  --stretch-title: 90%;    /* titles */
+
+  /* ---- Shape: radius by role, not one size for everything -------------- */
+  --radius-xs: 6px;        /* tags */
+  --radius-sm: 10px;       /* controls */
+  --radius-md: 14px;       /* blocks inside a group */
+  --radius-lg: 20px;       /* groups, sheets */
+
+  /* ---- Light: chalk & iron --------------------------------------------- */
+  --canvas: #F1F2F4;
+  --surface: #FFFFFF;
+  --surface-2: #EBEDF0;
+  --surface-pressed: #E1E4E8;
+  --surface-edge: rgba(22, 25, 29, 0.06);
+  --raised: #FFFFFF;          /* the selected segment, lifted off its track */
+  --float-edge: rgba(22, 25, 29, 0);
+  --sheet-edge: rgba(22, 25, 29, 0.06);
+  --surface-inverse: #16191D;
+  --on-inverse: #F1F2F4;
+  --on-inverse-2: #A2A8B0;
+  --hairline: #E0E3E7;
+  --hairline-strong: #CDD1D7;
+
+  --ink: #16191D;
+  --ink-2: #585F68;
+  --ink-3: #646B74;
+  --ink-disabled: #B4B9C0;
+
+  --brass: #AF8433;         /* fills and icons */
+  --brass-text: #8B641A;    /* brass words on light surfaces (5.3:1) */
+  --brass-tint: #F6EFE2;
+  --brass-line: #E4D2AE;
+  --on-brass: #16191D;      /* iron on brass: 5.2:1 (white would be 3.4:1) */
+
+  --danger: #C8443B;
+  --danger-text: #B3372F;
+  --danger-tint: #FBEBE9;
+  --danger-line: #F2C7C2;
+
+  --ember: #D9662E;          /* attention that isn't failure */
+  --ember-text: #A6481D;
+  --ember-tint: #FCEEE6;
+  --ember-line: #F4CDB7;
+
+  /* Data: validated pair (brass, steel blue) + a one-hue brass ramp */
+  --series-1: #A97E2C;
+  --series-2: #3F70B0;
+  --heat-0: #EBEDF0;
+  --heat-1: #EAD9B6;
+  --heat-2: #CDA85C;
+  --heat-3: #96701F;
+  --data-muted: #8B929A;    /* past periods behind the current one (3:1) */
+
+  --scrim: rgba(22, 25, 29, 0.40);
+  --focus-ring: #3F70B0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* ---- Dark: iron on black ------------------------------------------- */
+    --canvas: #000000;
+    --surface: #131416;
+    --surface-2: #1D1F22;
+    --surface-pressed: #26292D;
+    --surface-edge: rgba(255, 255, 255, 0.04);
+    --raised: #33373D;
+    --float-edge: rgba(255, 255, 255, 0.09);
+    --sheet-edge: rgba(255, 255, 255, 0.10);
+    --surface-inverse: #24272C;
+    --on-inverse: #EEF0F2;
+    --on-inverse-2: #A2A8B0;
+    --hairline: #24272B;
+    --hairline-strong: #33373C;
+
+    --ink: #EEF0F2;
+    --ink-2: #A2A8B0;
+    --ink-3: #838A93;
+    --ink-disabled: #4A4F56;
+
+    --brass: #DBB066;
+    --brass-text: #DEB870;
+    --brass-tint: #262115;
+    --brass-line: #4A3E27;
+    --on-brass: #16191D;
+
+    --danger: #E0584D;
+    --danger-text: #F1786E;
+    --danger-tint: #2E1614;
+    --danger-line: #5A2A26;
+
+    --ember: #E57A45;
+    --ember-text: #F29566;
+    --ember-tint: #2E1C12;
+    --ember-line: #5A3420;
+
+    --series-1: #B8892D;
+    --series-2: #5188CD;
+    --heat-0: #1D1F22;
+    --heat-1: #4A3D22;
+    --heat-2: #8C6B2C;
+    --heat-3: #D6AA58;
+    --data-muted: #63696F;
+
+    --scrim: rgba(0, 0, 0, 0.62);
+    --focus-ring: #5188CD;
+  }
+}
+
+/* ---- Semantic aliases ---------------------------------------------------
+ * The names the components use. They follow the theme automatically.
+ * Success is brass: in this app "done" and "record" are the achievement. */
+:root {
+  --bg-primary: var(--canvas);
+  --bg-card: var(--surface);
+  --bg-secondary: var(--surface-2);
+  --bg-active: var(--surface-pressed);
+
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-2);
+  --text-muted: var(--ink-3);
+  --text-disabled: var(--ink-disabled);
+
+  --border-color: var(--hairline);
+  --border-strong: var(--hairline-strong);
+
+  --accent: var(--brass);
+  --accent-strong: var(--brass-text);
+  --accent-glow: var(--brass-tint);
+
+  --success: var(--brass);
+  --success-strong: var(--brass-text);
+  --success-glow: var(--brass-tint);
+
+  --warning: var(--ember);
+  --warning-strong: var(--ember-text);
+  --warning-glow: var(--ember-tint);
+
+  --error: var(--danger);
+  --error-strong: var(--danger-text);
+  --error-glow: var(--danger-tint);
+
+  --action: var(--ink);
+  --action-text: var(--surface);
+}

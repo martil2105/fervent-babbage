@@ -4,7 +4,8 @@
  *
  * It is ambient: never interactive, never labelled per-tick. The point is that
  * a year of training is legible in 100px without anyone having to open a chart,
- * and that the only mark carrying colour is the one where a record was set.
+ * and that the only mark carrying colour — brass — is the one where a record
+ * was set.
  *
  * Ticks sit in a fixed number of slots with the newest at the right, so a
  * lifter with four sessions gets four marks and three-quarters of empty rather
@@ -60,8 +61,9 @@ export default function AccretionStrip({ points, height = 22, label, className, 
               y1={height - 1}
               x2={x}
               y2={height - 1 - h}
-              stroke={p.isRecord ? 'var(--accent)' : 'var(--text-disabled)'}
-              strokeWidth={p.isRecord ? 1.75 : 1}
+              stroke={p.isRecord ? 'var(--brass)' : 'var(--ink-3)'}
+              strokeWidth={p.isRecord ? 2 : 1}
+              strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
             />
           );
@@ -71,7 +73,7 @@ export default function AccretionStrip({ points, height = 22, label, className, 
           y1={height - 0.5}
           x2="100"
           y2={height - 0.5}
-          stroke="var(--border-color)"
+          stroke="var(--hairline-strong)"
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
         />

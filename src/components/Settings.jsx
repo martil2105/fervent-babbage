@@ -303,262 +303,265 @@ export default function Settings({
 
   const currentPrefMode = preferences?.prefLoggingMode || 'RPE';
 
-  return (
-    <div className="tab-content">
-      {/* 1. App Logging Preferences */}
-      <div className="card">
-        <h3 className="card-title">Logging Preferences</h3>
-        <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
-          Select whether you prefer logging set intensity using RPE (Rate of Perceived Exertion) or RIR (Reps in Reserve).
-        </p>
-        <div className="sub-tabs" style={{ marginTop: '4px' }}>
-          <button 
-            type="button"
-            className={`sub-tab-btn ${currentPrefMode === 'RPE' ? 'active' : ''}`}
-            onClick={() => updatePreference('prefLoggingMode', 'RPE')}
-          >
-            RPE (Scale 6-10)
-          </button>
-          <button 
-            type="button"
-            className={`sub-tab-btn ${currentPrefMode === 'RIR' ? 'active' : ''}`}
-            onClick={() => updatePreference('prefLoggingMode', 'RIR')}
-          >
-            RIR (Scale 0-5)
-          </button>
-        </div>
+  const pickFolder = async () => {
+    setChoosingFolder(true);
+    await chooseBackupFolder();
+    setChoosingFolder(false);
+  };
 
-        {/* Rest timer notifications */}
-        {notificationsSupported() && (
-          <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
-            <span className="text-xs text-bold" style={{ display: 'block' }}>Rest timer alerts</span>
-            <span className="text-xs text-muted" style={{ display: 'block', marginTop: '2px' }}>
-              {notifyPermission === 'granted'
-                ? 'You’ll get a notification when rest ends while you’re in another app.'
-                : notifyPermission === 'denied'
-                  ? 'Blocked in your browser settings. The timer still vibrates.'
-                  : 'The timer vibrates, which you’ll miss if you’ve switched apps.'}
-            </span>
-            {notifyPermission === 'default' && (
+  return (
+    <div className="tab-content settings">
+      {/* 1. Logging */}
+      <section className="settings-section">
+        <h2 className="section-label">Logging</h2>
+        <div className="card">
+          <div className="settings-block">
+            <div className="settings-row-main">
+              <span className="settings-row-title">Effort scale</span>
+              <span className="settings-row-sub">
+                Rate each set by RPE, how hard it felt, or by RIR, the reps you
+                had left.
+              </span>
+            </div>
+            <div className="sub-tabs">
               <button
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: '8px' }}
-                onClick={async () => setNotifyPermission(await requestNotificationPermission())}
+                type="button"
+                className={`sub-tab-btn ${currentPrefMode === 'RPE' ? 'active' : ''}`}
+                onClick={() => updatePreference('prefLoggingMode', 'RPE')}
+                aria-pressed={currentPrefMode === 'RPE'}
               >
-                Enable notifications
+                RPE 6–10
               </button>
-            )}
+              <button
+                type="button"
+                className={`sub-tab-btn ${currentPrefMode === 'RIR' ? 'active' : ''}`}
+                onClick={() => updatePreference('prefLoggingMode', 'RIR')}
+                aria-pressed={currentPrefMode === 'RIR'}
+              >
+                RIR 0–5
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Rest timer notifications */}
+          {notificationsSupported() && (
+            <div className="settings-row has-rule">
+              <div className="settings-row-main">
+                <span className="settings-row-title">Rest timer alerts</span>
+                <span className="settings-row-sub">
+                  {notifyPermission === 'granted'
+                    ? 'You’ll get a notification when rest ends while you’re in another app.'
+                    : notifyPermission === 'denied'
+                      ? 'Blocked in your browser settings. The timer still vibrates.'
+                      : 'The timer vibrates, which you’ll miss if you’ve switched apps.'}
+                </span>
+              </div>
+              {notifyPermission === 'default' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={async () => setNotifyPermission(await requestNotificationPermission())}
+                >
+                  Turn on
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* 2. Sessions (routines) */}
-      <div className="card">
-        <div className="card-title">
-          <span>Sessions</span>
-        </div>
-        <p className="text-xs text-muted" style={{ marginTop: '-4px', marginBottom: '10px' }}>
-          Each session is a separate workout you can start. An exercise appears
-          only in the sessions it&apos;s added to.
-        </p>
+      <section className="settings-section">
+        <h2 className="section-label">Sessions</h2>
+        <div className="card">
+          <p className="card-sub">
+            Each session is a workout you can start. An exercise appears only in
+            the sessions it&apos;s added to.
+          </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {routines.map((routine) => {
-            const isRenaming = renamingRoutineId === routine.id;
-            const count = routine.exerciseIds?.length || 0;
+          <div className="settings-list">
+            {routines.map((routine) => {
+              const isRenaming = renamingRoutineId === routine.id;
+              const count = routine.exerciseIds?.length || 0;
 
-            return (
-              <div key={routine.id} style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px 12px',
-                backgroundColor: 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)'
-              }}>
-                {isRenaming ? (
-                  <form
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      renameRoutine(routine.id, routineDraftName);
-                      setRenamingRoutineId(null);
-                    }}
-                  >
-                    <input
-                      className="form-input"
-                      value={routineDraftName}
-                      onChange={(e) => setRoutineDraftName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') setRenamingRoutineId(null);
+              return (
+                <div key={routine.id} className="settings-row">
+                  {isRenaming ? (
+                    <form
+                      className="inline-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        renameRoutine(routine.id, routineDraftName);
+                        setRenamingRoutineId(null);
                       }}
-                      style={{ flex: 1, minWidth: 0 }}
-                      aria-label="Session name"
-                      enterKeyHint="done"
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      className="btn btn-secondary btn-icon-only btn-sm"
-                      style={{ border: 'none', background: 'none' }}
-                      aria-label="Save name"
                     >
-                      <Check size={14} style={{ color: 'var(--success-strong)' }} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-icon-only btn-sm"
-                      onClick={() => setRenamingRoutineId(null)}
-                      style={{ border: 'none', background: 'none' }}
-                      aria-label="Cancel rename"
-                    >
-                      <X size={14} style={{ color: 'var(--text-secondary)' }} />
-                    </button>
-                  </form>
-                ) : (
-                  <>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="text-bold" style={{ fontSize: '14px' }}>{routine.name}</div>
-                      <span className="text-xs text-muted">
-                        {count} exercise{count === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    <button
-                      className="btn btn-secondary btn-icon-only btn-sm"
-                      onClick={() => setReorderRoutineId(routine.id)}
-                      disabled={count === 0}
-                      style={{ border: 'none', background: 'none', opacity: count === 0 ? 0.35 : 1 }}
-                      aria-label={`Change the order of ${routine.name}`}
-                      title="Exercise order"
-                    >
-                      <ArrowUpDown size={14} style={{ color: 'var(--text-secondary)' }} />
-                    </button>
-                    <button
-                      className="btn btn-secondary btn-icon-only btn-sm"
-                      onClick={() => {
-                        setRenamingRoutineId(routine.id);
-                        setRoutineDraftName(routine.name);
-                      }}
-                      style={{ border: 'none', background: 'none' }}
-                      aria-label={`Rename ${routine.name}`}
-                    >
-                      <Edit2 size={14} style={{ color: 'var(--text-secondary)' }} />
-                    </button>
-                    {/* Deleting the last session would leave nothing to start */}
-                    <button
-                      className="btn btn-secondary btn-icon-only btn-sm"
-                      disabled={routines.length <= 1}
-                      title={routines.length <= 1 ? 'Keep at least one session' : undefined}
-                      onClick={() => setPendingDelete({ kind: 'routine', id: routine.id, name: routine.name, count })}
-                      style={{ border: 'none', background: 'none', opacity: routines.length <= 1 ? 0.35 : 1 }}
-                      aria-label={`Delete ${routine.name}`}
-                    >
-                      <Trash2 size={14} style={{ color: 'var(--error)' }} />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                      <input
+                        className="form-input"
+                        value={routineDraftName}
+                        onChange={(e) => setRoutineDraftName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setRenamingRoutineId(null);
+                        }}
+                        aria-label="Session name"
+                        enterKeyHint="done"
+                        autoFocus
+                      />
+                      <button type="submit" className="icon-btn" aria-label="Save name">
+                        <Check size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn is-quiet"
+                        onClick={() => setRenamingRoutineId(null)}
+                        aria-label="Cancel rename"
+                      >
+                        <X size={16} />
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="settings-row-main">
+                        <span className="settings-row-title">{routine.name}</span>
+                        <span className="settings-row-sub">
+                          {count} exercise{count === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-btn is-quiet"
+                        onClick={() => setReorderRoutineId(routine.id)}
+                        disabled={count === 0}
+                        aria-label={`Change the order of ${routine.name}`}
+                        title="Exercise order"
+                      >
+                        <ArrowUpDown size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn is-quiet"
+                        onClick={() => {
+                          setRenamingRoutineId(routine.id);
+                          setRoutineDraftName(routine.name);
+                        }}
+                        aria-label={`Rename ${routine.name}`}
+                      >
+                        <Edit2 size={15} />
+                      </button>
+                      {/* Deleting the last session would leave nothing to start */}
+                      <button
+                        type="button"
+                        className="icon-btn is-quiet is-danger"
+                        disabled={routines.length <= 1}
+                        title={routines.length <= 1 ? 'Keep at least one session' : undefined}
+                        onClick={() => setPendingDelete({ kind: 'routine', id: routine.id, name: routine.name, count })}
+                        aria-label={`Delete ${routine.name}`}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            addRoutine(newRoutineName);
-            setNewRoutineName('');
-          }}
-          style={{ display: 'flex', gap: '8px', marginTop: '10px' }}
-        >
-          <input
-            className="form-input"
-            placeholder="New session, e.g. Pull"
-            value={newRoutineName}
-            onChange={(e) => setNewRoutineName(e.target.value)}
-            style={{ flex: 1, minWidth: 0 }}
-            aria-label="New session name"
-          />
-          <button className="btn btn-secondary btn-sm" type="submit" disabled={!newRoutineName.trim()}>
-            <Plus size={14} /> Add
-          </button>
-        </form>
-      </div>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              addRoutine(newRoutineName);
+              setNewRoutineName('');
+            }}
+          >
+            <input
+              className="form-input"
+              placeholder="New session, e.g. Pull"
+              value={newRoutineName}
+              onChange={(e) => setNewRoutineName(e.target.value)}
+              aria-label="New session name"
+            />
+            <button className="btn btn-secondary" type="submit" disabled={!newRoutineName.trim()}>
+              <Plus size={15} /> Add
+            </button>
+          </form>
+        </div>
+      </section>
 
       {/* Duplicates: the same lift logged under different spellings */}
       {duplicateGroups.length > 0 && (
-        <div className="card" style={{ borderColor: 'var(--fox-200)' }}>
-          <h3 className="card-title" style={{ justifyContent: 'flex-start', gap: '8px' }}>
-            <GitMerge size={17} style={{ color: 'var(--warning-strong)' }} /> Possible duplicates
-          </h3>
-          <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
-            These look like one exercise under different names, so their history is
-            split. Merging moves it all onto one name.
-          </p>
-          {duplicateGroups.map((group) => (
-            <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px 12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
-              {[group.target, ...group.others].map((e, i) => (
-                <div key={e.id} style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <button type="button" className="link-btn text-bold" style={{ fontSize: '14px' }} onClick={() => onOpenExercise?.(e.id)}>
-                    {e.name}
-                  </button>
-                  <span className="text-xs text-muted">
-                    {e.sessionCount} session{e.sessionCount === 1 ? '' : 's'}{i === 0 ? ' · keep' : ''}
-                  </span>
-                </div>
-              ))}
-              <button type="button" className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => setPendingMerge(group)}>
-                <GitMerge size={14} /> Merge into {group.target.name}
-              </button>
-            </div>
-          ))}
-        </div>
+        <section className="settings-section">
+          <h2 className="section-label">Possible duplicates</h2>
+          <div className="card is-attention">
+            <p className="card-sub">
+              These look like one exercise under different names, so their
+              history is split. Merging moves it all onto one name.
+            </p>
+            {duplicateGroups.map((group) => (
+              <div key={group.key} className="dup-group">
+                {[group.target, ...group.others].map((e, i) => (
+                  <div key={e.id} className="dup-row">
+                    <button type="button" className="link-btn dup-name" onClick={() => onOpenExercise?.(e.id)}>
+                      {e.name}
+                    </button>
+                    <span className="dup-meta">
+                      {e.sessionCount} session{e.sessionCount === 1 ? '' : 's'}
+                    </span>
+                    {i === 0 && <span className="tag is-brass">Keeps its name</span>}
+                  </div>
+                ))}
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPendingMerge(group)}>
+                  <GitMerge size={14} /> Merge into {group.target.name}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* 3. Exercises Configuration */}
-      <div className="card">
-        <div className="card-title">
-          <span>Workout Exercises</span>
+      {/* 3. Exercise library */}
+      <section className="settings-section">
+        <div className="section-head">
+          <h2 className="section-label">Exercise library</h2>
           {!showAddNew && (
-            <button className="btn btn-primary btn-sm" onClick={() => setShowAddNew(true)}>
-              <Plus size={14} /> Add
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAddNew(true)}>
+              <Plus size={14} /> New exercise
             </button>
           )}
         </div>
-        
-        {/* Add New Global Exercise Form */}
+
+        {/* New exercise */}
         {showAddNew && (
-          <form onSubmit={handleCreateExercise} style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '14px', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', margin: '4px 0 10px 0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="text-bold" style={{ fontSize: '13px' }}>Create Template Exercise</span>
-              <button type="button" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => setShowAddNew(false)}>
+          <form onSubmit={handleCreateExercise} className="card form-card">
+            <div className="form-card-head">
+              <h3 className="card-title">New exercise</h3>
+              <button type="button" className="sheet-close" onClick={() => setShowAddNew(false)} aria-label="Close">
                 <X size={16} />
               </button>
             </div>
-            
+
             <div className="form-group">
               <label htmlFor="global-ex-name">Name</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 id="global-ex-name"
-                className="form-input" 
-                placeholder="e.g. Incline Bench Press" 
-                value={newName} 
-                onChange={(e) => setNewName(e.target.value)} 
-                required 
+                className="form-input"
+                placeholder="e.g. Incline Bench Press"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                required
               />
               {newNameMatch.exact ? (
-                <span className="text-xs" style={{ color: 'var(--warning-strong)' }}>
-                  You already have “{newNameMatch.exact.name}” — saving adds that one to the
+                <span className="field-note is-ember">
+                  You already have “{newNameMatch.exact.name}”. Saving adds that one to the
                   session instead of creating a copy.
                 </span>
               ) : newNameMatch.similar.length > 0 ? (
-                <span className="text-xs text-muted">
+                <span className="field-note">
                   Similar: {newNameMatch.similar.map((e) => `“${e.name}”`).join(', ')}
                 </span>
               ) : null}
             </div>
-            
+
             {routines.length > 0 && (
               <div className="form-group">
                 <label htmlFor="global-ex-routine">Add to session</label>
@@ -572,15 +575,13 @@ export default function Settings({
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
-                <span className="text-xs text-muted" style={{ marginTop: '4px', display: 'block' }}>
-                  An exercise only appears in the session you add it to.
-                </span>
+                <span className="field-note">An exercise only appears in the session you add it to.</span>
               </div>
             )}
 
             <div className="form-row-2">
               <div className="form-group">
-                <label htmlFor="global-ex-mg">Muscle Group</label>
+                <label htmlFor="global-ex-mg">Muscle group</label>
                 <select
                   id="global-ex-mg"
                   className="form-input"
@@ -593,8 +594,8 @@ export default function Settings({
                 </select>
               </div>
               <div className="form-group">
-                <label htmlFor="global-ex-type">Exercise Type</label>
-                <select 
+                <label htmlFor="global-ex-type">Type</label>
+                <select
                   id="global-ex-type"
                   className="form-input"
                   value={newExerciseType}
@@ -605,56 +606,56 @@ export default function Settings({
                     setNewWeightStep(stepForType(e.target.value));
                   }}
                 >
-                  <option value="compound">Compound (Multi-joint)</option>
-                  <option value="isolation">Isolation (Single-joint)</option>
+                  <option value="compound">Compound</option>
+                  <option value="isolation">Isolation</option>
                 </select>
               </div>
             </div>
 
             <div className="form-row-2">
               <div className="form-group">
-                <label htmlFor="global-ex-sets">Default Sets</label>
-                <input 
-                  type="number" 
+                <label htmlFor="global-ex-sets">Sets</label>
+                <input
+                  type="number"
                   id="global-ex-sets"
-                  className="form-input" 
-                  min="1" 
-                  max="10" 
-                  value={newSets} 
-                  onChange={(e) => setNewSets(e.target.value)} 
-                  required 
+                  className="form-input"
+                  min="1"
+                  max="10"
+                  value={newSets}
+                  onChange={(e) => setNewSets(e.target.value)}
+                  required
                 />
               </div>
               <div className="form-group">
-                <label htmlFor="global-ex-rest">Rest Duration (seconds)</label>
-                <input 
-                  type="number" 
+                <label htmlFor="global-ex-rest">Rest (seconds)</label>
+                <input
+                  type="number"
                   id="global-ex-rest"
-                  className="form-input" 
-                  min="10" 
+                  className="form-input"
+                  min="10"
                   step="5"
-                  value={newRestDuration} 
-                  onChange={(e) => setNewRestDuration(e.target.value)} 
-                  required 
+                  value={newRestDuration}
+                  onChange={(e) => setNewRestDuration(e.target.value)}
+                  required
                 />
               </div>
             </div>
 
             <div className="form-row-2">
               <div className="form-group">
-                <label htmlFor="global-ex-min-reps">Min Target Reps</label>
-                <input 
-                  type="number" 
+                <label htmlFor="global-ex-min-reps">Min reps</label>
+                <input
+                  type="number"
                   id="global-ex-min-reps"
-                  className="form-input" 
-                  min="1" 
-                  value={newMinReps} 
-                  onChange={(e) => setNewMinReps(e.target.value)} 
-                  required 
+                  className="form-input"
+                  min="1"
+                  value={newMinReps}
+                  onChange={(e) => setNewMinReps(e.target.value)}
+                  required
                 />
               </div>
               <div className="form-group">
-                <label htmlFor="global-ex-max-reps">Max Target Reps</label>
+                <label htmlFor="global-ex-max-reps">Max reps</label>
                 <input
                   type="number"
                   id="global-ex-max-reps"
@@ -669,7 +670,20 @@ export default function Settings({
 
             <div className="form-row-2">
               <div className="form-group">
-                <label htmlFor="global-ex-start">Starting Weight (kg)</label>
+                <label htmlFor="global-ex-step">Weight step (kg)</label>
+                <input
+                  type="number"
+                  id="global-ex-step"
+                  className="form-input"
+                  min="0.5"
+                  step="0.5"
+                  value={newWeightStep}
+                  onChange={(e) => setNewWeightStep(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="global-ex-start">Starting weight (kg)</label>
                 <input
                   type="number"
                   id="global-ex-start"
@@ -682,57 +696,45 @@ export default function Settings({
                 />
               </div>
             </div>
+            <span className="field-note">
+              The weight step is how much − and + change the weight during a
+              workout. Half kilos work, for 2.5 kg dumbbells and microplates.
+            </span>
 
-            <div className="form-group">
-              <label htmlFor="global-ex-step">Weight Step (kg)</label>
-              <input
-                type="number"
-                id="global-ex-step"
-                className="form-input"
-                min="0.5"
-                step="0.5"
-                value={newWeightStep}
-                onChange={(e) => setNewWeightStep(e.target.value)}
-                required
-              />
-              <span className="text-xs text-muted" style={{ marginTop: '2px' }}>
-                How much the +/- buttons change the weight during a workout.
-                Half kilos allowed, for 2.5 kg dumbbells and microplates.
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddNew(false)}>
+            <div className="form-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowAddNew(false)}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary btn-sm">
-                Save Exercise
+              <button type="submit" className="btn btn-primary">
+                Save exercise
               </button>
             </div>
           </form>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="pick-list library-list">
           {orderedExercises.map((ex) => {
             const isEditing = editingId === ex.id;
-            
+
             if (isEditing) {
               return (
-                <div key={ex.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-secondary)' }}>
+                <div key={ex.id} className="library-edit">
                   <div className="form-group">
-                    <label>Exercise Name</label>
-                    <input 
-                      type="text" 
+                    <label htmlFor={`edit-name-${ex.id}`}>Name</label>
+                    <input
+                      id={`edit-name-${ex.id}`}
+                      type="text"
                       className="form-input"
-                      value={editName} 
-                      onChange={(e) => setEditName(e.target.value)} 
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
                     />
                   </div>
 
                   <div className="form-row-2">
                     <div className="form-group">
-                      <label>Muscle Group</label>
-                      <select 
+                      <label htmlFor={`edit-mg-${ex.id}`}>Muscle group</label>
+                      <select
+                        id={`edit-mg-${ex.id}`}
                         className="form-input"
                         value={editMuscleGroup}
                         onChange={(e) => setEditMuscleGroup(e.target.value)}
@@ -743,8 +745,9 @@ export default function Settings({
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Exercise Type</label>
-                      <select 
+                      <label htmlFor={`edit-type-${ex.id}`}>Type</label>
+                      <select
+                        id={`edit-type-${ex.id}`}
                         className="form-input"
                         value={editExerciseType}
                         onChange={(e) => {
@@ -761,38 +764,42 @@ export default function Settings({
 
                   <div className="form-row-2">
                     <div className="form-group">
-                      <label>Default Sets</label>
-                      <input 
-                        type="number" 
+                      <label htmlFor={`edit-sets-${ex.id}`}>Sets</label>
+                      <input
+                        id={`edit-sets-${ex.id}`}
+                        type="number"
                         className="form-input"
-                        value={editSets} 
-                        onChange={(e) => setEditSets(e.target.value)} 
+                        value={editSets}
+                        onChange={(e) => setEditSets(e.target.value)}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Rest Duration (s)</label>
-                      <input 
-                        type="number" 
+                      <label htmlFor={`edit-rest-${ex.id}`}>Rest (seconds)</label>
+                      <input
+                        id={`edit-rest-${ex.id}`}
+                        type="number"
                         className="form-input"
-                        value={editRestDuration} 
-                        onChange={(e) => setEditRestDuration(e.target.value)} 
+                        value={editRestDuration}
+                        onChange={(e) => setEditRestDuration(e.target.value)}
                       />
                     </div>
                   </div>
 
                   <div className="form-row-2">
                     <div className="form-group">
-                      <label>Min Reps</label>
-                      <input 
-                        type="number" 
+                      <label htmlFor={`edit-min-${ex.id}`}>Min reps</label>
+                      <input
+                        id={`edit-min-${ex.id}`}
+                        type="number"
                         className="form-input"
-                        value={editMinReps} 
-                        onChange={(e) => setEditMinReps(e.target.value)} 
+                        value={editMinReps}
+                        onChange={(e) => setEditMinReps(e.target.value)}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Max Reps</label>
+                      <label htmlFor={`edit-max-${ex.id}`}>Max reps</label>
                       <input
+                        id={`edit-max-${ex.id}`}
                         type="number"
                         className="form-input"
                         value={editMaxReps}
@@ -803,8 +810,9 @@ export default function Settings({
 
                   <div className="form-row-2">
                     <div className="form-group">
-                      <label>Weight Step (kg)</label>
+                      <label htmlFor={`edit-step-${ex.id}`}>Weight step (kg)</label>
                       <input
+                        id={`edit-step-${ex.id}`}
                         type="number"
                         className="form-input"
                         min="0.5"
@@ -814,8 +822,9 @@ export default function Settings({
                       />
                     </div>
                     <div className="form-group">
-                      <label>Starting Weight (kg)</label>
+                      <label htmlFor={`edit-start-${ex.id}`}>Starting weight (kg)</label>
                       <input
+                        id={`edit-start-${ex.id}`}
                         type="number"
                         className="form-input"
                         min="0"
@@ -824,18 +833,19 @@ export default function Settings({
                         value={editStartingWeight}
                         onChange={(e) => setEditStartingWeight(e.target.value)}
                       />
-                      <span className="text-xs text-muted" style={{ marginTop: '4px', display: 'block' }}>
-                        Used only for the very first session, before there&apos;s
-                        any history. Leave blank to start with an empty field.
-                      </span>
                     </div>
                   </div>
+                  <span className="field-note">
+                    The starting weight is used only for the very first session,
+                    before there&apos;s any history. Leave it blank to start with an
+                    empty field.
+                  </span>
 
-                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={cancelEditing}>
-                      <X size={14} /> Cancel
+                  <div className="form-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={cancelEditing}>
+                      Cancel
                     </button>
-                    <button className="btn btn-primary btn-sm" onClick={() => saveEditing(ex)}>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => saveEditing(ex)}>
                       <Check size={14} /> Save
                     </button>
                   </div>
@@ -843,243 +853,211 @@ export default function Settings({
               );
             }
 
+            const rest = ex.restDuration || (ex.exerciseType === 'isolation' ? 90 : 120);
+            const step = formatWeight(ex.weightStep || stepForType(ex.exerciseType));
             return (
-              <div key={ex.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-secondary)' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button type="button" className="link-btn text-bold" style={{ fontSize: '14px' }} onClick={() => onOpenExercise?.(ex.id)}>
-                      {ex.name}
-                    </button>
-                    <span className="text-xs" style={{ 
-                      backgroundColor: 'var(--bg-card)', 
-                      padding: '1px 6px', 
-                      borderRadius: '8px', 
-                      color: 'var(--text-secondary)',
-                      fontSize: '9px',
-                      border: '1px solid var(--border-color)',
-                      fontWeight: 600
-                    }}>
-                      {ex.muscleGroup || 'Other'}
-                    </span>
-                    {!routinesByExerciseId[ex.id] && (
-                      <span className="text-xs text-muted" style={{ fontSize: '10px' }}>
-                        Not in a session
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted">
-                    {ex.targetSets} sets • {ex.minReps}–{ex.maxReps} reps • Rest: {ex.restDuration || (ex.exerciseType === 'isolation' ? 90 : 120)}s • ±{formatWeight(ex.weightStep || stepForType(ex.exerciseType))}kg
+              <div key={ex.id} className="library-row">
+                <div className="library-row-main">
+                  <button type="button" className="link-btn library-row-name" onClick={() => onOpenExercise?.(ex.id)}>
+                    {ex.name}
+                  </button>
+                  <span className="library-row-meta">
+                    <span className="meta-quiet">{ex.muscleGroup || 'Other'}</span>{' '}
+                    {ex.targetSets} × {ex.minReps}–{ex.maxReps}, {rest} s rest, ±{step} kg
                   </span>
 
                   {/* Tap a session to add or remove this exercise from it */}
                   {routines.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '5px' }}>
+                    <div className="chip-row" role="group" aria-label={`Sessions with ${ex.name}`}>
                       {routines.map((r) => {
                         const member = (r.exerciseIds || []).includes(ex.id);
                         return (
                           <button
                             key={r.id}
+                            type="button"
+                            className="chip is-small"
                             onClick={() => setExerciseInRoutine(r.id, ex.id, !member)}
                             aria-pressed={member}
-                            style={{
-                              fontSize: '9px',
-                              fontWeight: 600,
-                              padding: '2px 8px',
-                              borderRadius: '8px',
-                              cursor: 'pointer',
-                              backgroundColor: member ? 'var(--accent-glow)' : 'transparent',
-                              color: member ? 'var(--accent-strong)' : 'var(--text-muted)',
-                              border: `1px solid ${member ? 'var(--accent)' : 'var(--border-color)'}`
-                            }}
                           >
+                            {member && <Check size={12} strokeWidth={3} aria-hidden="true" />}
                             {r.name}
                           </button>
                         );
                       })}
+                      {!routinesByExerciseId[ex.id] && (
+                        <span className="chip-note">Not in a session</span>
+                      )}
                     </div>
                   )}
+                  {routines.length === 0 && (
+                    <span className="chip-note">Not in a session</span>
+                  )}
                 </div>
-                <div style={{ display: 'flex', gap: '4px' }}>
+                <div className="library-row-actions">
                   <button
-                    className="btn btn-secondary btn-icon-only btn-sm"
+                    type="button"
+                    className="icon-btn is-quiet"
                     onClick={() => startEditing(ex)}
-                    style={{ border: 'none', background: 'none' }}
                     aria-label={`Edit ${ex.name}`}
                   >
-                    <Edit2 size={14} style={{ color: 'var(--text-secondary)' }} />
+                    <Edit2 size={15} />
                   </button>
                   <button
-                    className="btn btn-secondary btn-icon-only btn-sm"
+                    type="button"
+                    className="icon-btn is-quiet is-danger"
                     onClick={() => setPendingDelete({ kind: 'exercise', id: ex.id, name: ex.name })}
-                    style={{ border: 'none', background: 'none' }}
                     aria-label={`Delete ${ex.name}`}
                   >
-                    <Trash2 size={14} style={{ color: 'var(--error)' }} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
+      </section>
 
-      {/* 3. Backup & Export */}
-      <div className="card">
-        <h3 className="card-title">Data & Backup</h3>
-        <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
-          Your training history is saved on this device in your browser (IndexedDB) — not in the cloud. Keep a backup so you don't lose it if you clear browsing data or switch devices.
-        </p>
+      {/* 4. Data and backup */}
+      <section className="settings-section">
+        <h2 className="section-label">Data and backup</h2>
+        <div className="card">
+          <p className="card-sub">
+            Your training history lives on this device, in this browser, not in
+            the cloud. Keep a backup so clearing browser data or changing phones
+            can&apos;t take it with it.
+          </p>
 
-        {/* Automatic backups to a folder on disk */}
-        <div style={{
-          padding: '12px',
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-color)',
-          backgroundColor: 'var(--bg-secondary)',
-          marginBottom: '10px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <HardDrive size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-            <span className="text-xs text-bold">Automatic backups</span>
-          </div>
-
-          {!backupFolderSupported() ? (
-            <span className="text-xs text-muted">
-              This browser can&apos;t write backups to a folder (Safari and iOS
-              don&apos;t support it). Use Export below and save the file somewhere safe.
+          {/* Backup freshness */}
+          <div className={`backup-status${backupStale ? ' is-stale' : ''}`}>
+            {backupStale
+              ? <AlertTriangle size={16} aria-hidden="true" />
+              : <Check size={16} strokeWidth={2.5} aria-hidden="true" />}
+            <span>
+              {backupLabel}{backupStale ? '. Export one to stay safe.' : ''}
             </span>
-          ) : backupFolderName ? (
-            <>
-              <span className="text-xs text-muted">
-                Saving to <span className="text-bold">{backupFolderName}</span> after
-                a workout, at most once every few days.
-              </span>
-              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  disabled={choosingFolder}
-                  onClick={async () => {
-                    setChoosingFolder(true);
-                    await chooseBackupFolder();
-                    setChoosingFolder(false);
-                  }}
-                >
-                  Change folder
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={forgetBackupFolder}>
-                  Turn off
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <span className="text-xs text-muted">
-                Pick a folder once and a backup is written automatically after your
-                workouts — no need to remember.
-              </span>
-              <button
-                className="btn btn-primary btn-sm"
-                style={{ marginTop: '8px' }}
-                disabled={choosingFolder}
-                onClick={async () => {
-                  setChoosingFolder(true);
-                  await chooseBackupFolder();
-                  setChoosingFolder(false);
-                }}
-              >
-                Choose backup folder
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Storage durability status */}
-        {storagePersisted !== null && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            padding: '10px 12px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid',
-            borderColor: storagePersisted ? 'var(--feather-200)' : 'var(--fox-200)',
-            backgroundColor: storagePersisted ? 'var(--success-glow)' : 'var(--warning-glow)'
-          }}>
-            {storagePersisted
-              ? <ShieldCheck size={18} style={{ color: 'var(--success-strong)', flexShrink: 0 }} />
-              : <ShieldAlert size={18} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} />}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <span className="text-xs text-bold" style={{ color: storagePersisted ? 'var(--success-strong)' : 'var(--warning-strong)' }}>
-                {storagePersisted ? 'Persistent storage on' : 'Best-effort storage'}
-              </span>
-              <span className="text-xs text-muted">
-                {storagePersisted
-                  ? 'Protected from automatic browser cleanup.'
-                  : 'The browser may clear data if your disk runs low.'}
-              </span>
-            </div>
-            {!storagePersisted && (
-              <button className="btn btn-primary btn-sm" onClick={handleEnablePersistence} disabled={enabling}>
-                {enabling ? '…' : 'Enable'}
-              </button>
-            )}
           </div>
-        )}
 
-        {/* Storage usage */}
-        {estimate && estimate.usage > 0 && (
-          <div className="text-xs text-muted" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <HardDrive size={13} /> Using {formatBytes(estimate.usage)}{estimate.quota ? ` of ${formatBytes(estimate.quota)} available` : ''}
+          <div className="button-stack">
+            <button type="button" className="btn btn-secondary btn-block btn-start" onClick={exportData}>
+              <FileDown size={17} /> Export backup
+              <span className="btn-aside">.json</span>
+            </button>
+            <button type="button" className="btn btn-secondary btn-block btn-start" onClick={handleImportClick}>
+              <FileUp size={17} /> Import backup
+              <span className="btn-aside">.json</span>
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              accept=".json,application/json"
+            />
           </div>
-        )}
-
-        {/* Backup freshness nudge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: backupStale ? 'var(--warning-strong)' : 'var(--text-muted)' }}>
-          {backupStale ? <AlertTriangle size={14} style={{ flexShrink: 0 }} /> : <Check size={14} style={{ flexShrink: 0 }} />}
-          <span className={backupStale ? 'text-bold' : ''}>
-            {backupLabel}{backupStale ? ' — export one to stay safe' : ''}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={exportData} style={{ justifyContent: 'flex-start' }}>
-            <FileDown size={16} /> Export Backup (.json)
-          </button>
-
-          <button className="btn btn-secondary" onClick={handleImportClick} style={{ justifyContent: 'flex-start' }}>
-            <FileUp size={16} /> Import Backup (.json)
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-            accept=".json,application/json"
-          />
 
           {importStatus === 'success' && (
-            <div role="status" className="text-xs text-bold" style={{ color: 'var(--success-strong)', marginTop: '4px' }}>
-              ✓ Backup restored.
+            <div role="status" className="inline-status is-brass">
+              <Check size={15} strokeWidth={2.5} aria-hidden="true" /> Backup restored.
             </div>
           )}
           {importStatus === 'error' && (
-            <div role="alert" className="text-xs text-bold" style={{ color: 'var(--error-strong)', marginTop: '4px' }}>
-              ✗ {importError || 'That file couldn’t be imported. Make sure it’s a backup exported from this app.'}
+            <div role="alert" className="inline-status is-danger">
+              <X size={15} strokeWidth={2.5} aria-hidden="true" />
+              {importError || 'That file couldn’t be imported. Make sure it’s a backup exported from this app.'}
+            </div>
+          )}
+
+          {/* Automatic backups to a folder on disk */}
+          <div className="settings-row has-rule">
+            <HardDrive size={18} className="settings-row-icon" aria-hidden="true" />
+            <div className="settings-row-main">
+              <span className="settings-row-title">Automatic backups</span>
+              <span className="settings-row-sub">
+                {!backupFolderSupported()
+                  ? 'This browser can’t write backups to a folder (Safari and iOS don’t support it). Use Export and save the file somewhere safe.'
+                  : backupFolderName
+                    ? <>Saving to <strong>{backupFolderName}</strong> after a workout, at most once every few days.</>
+                    : 'Pick a folder once and a backup is written after your workouts, with nothing to remember.'}
+              </span>
+              {backupFolderSupported() && (
+                <div className="settings-row-buttons">
+                  {backupFolderName ? (
+                    <>
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={choosingFolder} onClick={pickFolder}>
+                        Change folder
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={forgetBackupFolder}>
+                        Turn off
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-primary btn-sm" disabled={choosingFolder} onClick={pickFolder}>
+                      Choose backup folder
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Storage use, when the browser can't say whether it's persistent */}
+          {storagePersisted === null && estimate && estimate.usage > 0 && (
+            <div className="settings-row has-rule">
+              <HardDrive size={18} className="settings-row-icon" aria-hidden="true" />
+              <div className="settings-row-main">
+                <span className="settings-row-sub">
+                  Using {formatBytes(estimate.usage)}{estimate.quota ? ` of ${formatBytes(estimate.quota)} available` : ''}.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Storage durability status */}
+          {storagePersisted !== null && (
+            <div className="settings-row has-rule">
+              {storagePersisted
+                ? <ShieldCheck size={18} className="settings-row-icon is-brass" aria-hidden="true" />
+                : <ShieldAlert size={18} className="settings-row-icon is-ember" aria-hidden="true" />}
+              <div className="settings-row-main">
+                <span className="settings-row-title">
+                  {storagePersisted ? 'Persistent storage is on' : 'Best-effort storage'}
+                </span>
+                <span className="settings-row-sub">
+                  {storagePersisted
+                    ? 'Protected from automatic browser cleanup.'
+                    : 'The browser may clear data if your storage runs low.'}
+                  {estimate && estimate.usage > 0
+                    ? ` Using ${formatBytes(estimate.usage)}${estimate.quota ? ` of ${formatBytes(estimate.quota)}` : ''}.`
+                    : ''}
+                </span>
+              </div>
+              {!storagePersisted && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleEnablePersistence} disabled={enabling}>
+                  {enabling ? '…' : 'Turn on'}
+                </button>
+              )}
             </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* 4. Danger Zone */}
-      <div className="card" style={{ borderColor: 'var(--cardinal-200)' }}>
-        <h3 className="card-title" style={{ color: 'var(--error-strong)' }}>Danger Zone</h3>
-        <p className="text-xs text-muted" style={{ marginTop: '-4px' }}>
-          Resetting the app will permanently delete all your custom exercises, set histories, and active workouts. This cannot be undone.
-        </p>
-        <button className="btn btn-danger" onClick={() => setShowResetConfirm(true)} style={{ justifyContent: 'center' }}>
-          <Trash size={16} /> Reset All Data
-        </button>
-      </div>
+      {/* 5. Reset */}
+      <section className="settings-section">
+        <h2 className="section-label">Reset</h2>
+        <div className="card">
+          <p className="card-sub">
+            Deletes every exercise, session and logged workout on this device and
+            restores the defaults. This can&apos;t be undone.
+          </p>
+          <button type="button" className="btn btn-danger btn-block" onClick={() => setShowResetConfirm(true)}>
+            <Trash size={16} /> Reset all data
+          </button>
+        </div>
+      </section>
+
+      <p className="colophon">
+        Hypertrophy Log. Everything you log stays on this device.
+      </p>
 
       {/* Reset Confirmation Modal */}
       {showResetConfirm && (
@@ -1092,7 +1070,9 @@ export default function Settings({
             setShowResetConfirm(false);
           }}
         >
-          Are you absolutely sure you want to clear all data? This will erase your entire workout history and restore the default settings.
+          This erases your whole workout history, every exercise and session, and
+          restores the default settings. Export a backup first if you might want
+          any of it back.
         </ConfirmDialog>
       )}
 

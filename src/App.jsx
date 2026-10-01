@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { BarChart2, Dumbbell, Calendar, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
+import { Gauge, Dumbbell, CalendarDays, Settings as SettingsIcon, TrendingUp } from 'lucide-react';
 import { useWorkoutState, CURRENT_WORKOUT_KEY } from './hooks/useWorkoutState';
 import { useRestAlarm } from './hooks/useRestAlarm';
 import Dashboard from './components/Dashboard';
@@ -21,7 +21,7 @@ const initialTab = () => {
 };
 
 // Header pill shown on other tabs while a session is open. During rest it
-// counts down, so the rest timer is still visible from Analytics or History.
+// counts down, so the rest timer is still visible from Progress or History.
 // It ticks on its own so the open tab isn't re-rendered twice a second.
 function ActiveSessionBadge({ restEndTime, onClick }) {
   const [now, setNow] = useState(() => Date.now());
@@ -38,47 +38,44 @@ function ActiveSessionBadge({ restEndTime, onClick }) {
   const restDone = remaining !== null && remaining <= 0;
 
   const label = resting
-    ? `REST ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
-    : restDone ? 'REST DONE' : 'ACTIVE SESSION';
+    ? `Rest ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
+    : restDone ? 'Rest over' : 'Back to workout';
 
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={`${label.toLowerCase()} — open workout`}
-      style={{
-        backgroundColor: restDone ? 'var(--warning-glow)' : 'var(--success-glow)',
-        color: restDone ? 'var(--warning-strong)' : 'var(--success-strong)',
-        fontFamily: 'inherit',
-        fontSize: '11px',
-        fontWeight: 600,
-        fontVariantNumeric: 'tabular-nums',
-        padding: '4px 10px',
-        borderRadius: '20px',
-        border: `1px solid ${restDone ? 'var(--fox-200)' : 'var(--feather-200)'}`,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px'
-      }}
+      aria-label={`${label}. Open the workout`}
+      className={`session-pill${restDone ? ' is-done' : ''}`}
     >
-      <span style={{
-        width: '6px',
-        height: '6px',
-        borderRadius: '50%',
-        backgroundColor: restDone ? 'var(--warning)' : 'var(--success)',
-        display: 'inline-block'
-      }}></span>
+      <span className="dot" aria-hidden="true" />
       {label}
     </button>
   );
 }
 
+// Today's date for the Summary header. Re-read when the app comes back to the
+// foreground, so a home-screen app left open overnight doesn't show yesterday.
+const todayLabel = () =>
+  new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+
+function useTodayLabel() {
+  const [label, setLabel] = useState(todayLabel);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') setLabel(todayLabel());
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
+  }, []);
+  return label;
+}
+
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', Icon: BarChart2 },
+  { id: 'dashboard', label: 'Summary', Icon: Gauge },
   { id: 'workout', label: 'Workout', Icon: Dumbbell },
-  { id: 'analytics', label: 'Analytics', Icon: TrendingUp },
-  { id: 'history', label: 'History', Icon: Calendar },
+  { id: 'analytics', label: 'Progress', Icon: TrendingUp },
+  { id: 'history', label: 'History', Icon: CalendarDays },
   { id: 'settings', label: 'Settings', Icon: SettingsIcon }
 ];
 
@@ -87,6 +84,7 @@ export default function App() {
   const workoutState = useWorkoutState();
 
   const { currentWorkout } = workoutState;
+  const today = useTodayLabel();
 
   // The exercise page opens over whatever tab you're on — from the workout,
   // History or Settings — and closing it puts you back where you were.
@@ -98,6 +96,9 @@ export default function App() {
   useEffect(() => {
     contentRef.current?.scrollTo(0, 0);
   }, [activeTab]);
+
+  // The header gets a hairline once content scrolls beneath it.
+  const [scrolled, setScrolled] = useState(false);
 
   // End-of-rest alert, mounted here so it fires whichever tab is open.
   useRestAlarm({
@@ -203,12 +204,17 @@ export default function App() {
 
   return (
     <>
-      {/* App Header */}
-      <header className="app-header">
-        <h1 className="app-title">
-          <Dumbbell size={24} style={{ transform: 'rotate(-45deg)' }} />
-          HYPERTROPHY.LOG
-        </h1>
+      {/* Header: the page title, large and left-aligned. During a workout the
+          title is the session you're doing. */}
+      <header className={`app-header${scrolled ? ' is-scrolled' : ''}`}>
+        <div className="app-header-titles">
+          {activeTab === 'dashboard' && <span className="app-eyebrow">{today}</span>}
+          <h1 className="app-title">
+            {activeTab === 'workout' && currentWorkout
+              ? currentWorkout.routineName || 'Workout'
+              : TABS.find((t) => t.id === activeTab)?.label}
+          </h1>
+        </div>
         {currentWorkout && activeTab !== 'workout' && (
           <ActiveSessionBadge
             restEndTime={workoutState.restEndTime}
@@ -218,7 +224,11 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      <main className="app-content" ref={contentRef}>
+      <main
+        className="app-content"
+        ref={contentRef}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 4)}
+      >
         {renderTabContent()}
       </main>
 
@@ -235,31 +245,21 @@ export default function App() {
       )}
 
       {/* Bottom Tab Navigation */}
-      <nav className="app-navigation">
+      <nav className="app-navigation" aria-label="Main">
         {TABS.map((tab) => {
           const { id, label, Icon } = tab;
           return (
             <button
               key={id}
+              type="button"
               className={`nav-tab ${activeTab === id ? 'active' : ''}`}
               onClick={() => setActiveTab(id)}
               aria-current={activeTab === id ? 'page' : undefined}
-              style={id === 'workout' ? { position: 'relative' } : undefined}
             >
               <Icon aria-hidden="true" />
               <span>{label}</span>
               {id === 'workout' && currentWorkout && (
-                <span aria-label="session in progress" style={{
-                  position: 'absolute',
-                  top: '6px',
-                  right: 'calc(50% - 14px)',
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--success)',
-                  border: '2px solid var(--bg-secondary)',
-                  boxSizing: 'content-box'
-                }} />
+                <span className="nav-dot" aria-label="session in progress" />
               )}
             </button>
           );

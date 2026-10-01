@@ -40,23 +40,22 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={children ? bodyId : undefined}
-        style={tone === 'danger' ? { borderColor: 'var(--cardinal-200)' } : undefined}
       >
-        <h3 id={titleId} style={{ margin: 0, color: tone === 'danger' ? 'var(--error-strong)' : 'var(--text-primary)' }}>
+        <h3 id={titleId} className="modal-title">
           {title}
         </h3>
         {children && (
-          <div id={bodyId} className="text-muted" style={{ margin: 0, fontSize: '14px', lineHeight: 1.45 }}>
+          <div id={bodyId} className="modal-body">
             {children}
           </div>
         )}
         <div className="modal-actions">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel} disabled={busy} autoFocus>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy} autoFocus>
             {cancelLabel}
           </button>
           <button
             type="button"
-            className={`btn btn-sm ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`}
+            className={`btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'}`}
             onClick={onConfirm}
             disabled={busy}
           >

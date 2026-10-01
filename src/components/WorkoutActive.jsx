@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Play, Check, Trash2, Plus, Dumbbell, Ghost, TrendingUp, Trophy, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Check, Trash2, Plus, Minus, TrendingUp, Trophy, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import AccretionStrip from './AccretionStrip';
 import ConfirmDialog from './ConfirmDialog';
@@ -18,6 +18,7 @@ import {
   formatWeight,
   summarizeSets
 } from '../utils/workoutHelpers';
+import { daysAgo, sentenceCase } from '../utils/format';
 
 // Format seconds to MM:SS (or H:MM:SS past the hour)
 const formatDuration = (seconds) => {
@@ -42,9 +43,15 @@ function ElapsedClock({ startTime }) {
   return <span className="timer-text">{formatDuration(elapsed)}</span>;
 }
 
-// Floating rest panel. Also ticks on its own (every 500 ms). The alert itself
+// Floating rest bar. Also ticks on its own (every 500 ms). The alert itself
 // — vibration, notification, auto-clear — lives in useRestAlarm at the app
 // root, so it still fires when you're on another tab.
+//
+// The rest is drawn as a row of graduations that go out one by one from the
+// right: the interval is read by length before it is read as a number. When
+// it is over the whole bar turns brass — the next set is due.
+const REST_TICKS = 40;
+
 function RestPanel({ restEndTime, restTotalMs, extendRestTimer, clearRestTimer }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -54,83 +61,64 @@ function RestPanel({ restEndTime, restTotalMs, extendRestTimer, clearRestTimer }
 
   const timeRemaining = restEndTime - now;
   const timerSeconds = timeRemaining > 0 ? Math.ceil(timeRemaining / 1000) : 0;
-  const isFlashing = timeRemaining <= 0;
-  // The interval is read by length before it is read as a number. Fraction of
-  // the rest still owed, 1 -> 0; 0 when we have no denominator to divide by.
+  const isOver = timeRemaining <= 0;
+  // Fraction of the rest still owed, 1 -> 0; 0 when we have no denominator.
   const restRemaining = restTotalMs > 0
     ? Math.min(Math.max(timeRemaining / restTotalMs, 0), 1)
     : 0;
+  const lit = isOver ? REST_TICKS : Math.ceil(restRemaining * REST_TICKS);
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        bottom: 'calc(75px + env(safe-area-inset-bottom, 0px))',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 'calc(100% - 32px)',
-        maxWidth: '448px',
-        backgroundColor: isFlashing ? 'var(--warning-glow)' : 'var(--bg-card)',
-        borderColor: isFlashing ? 'var(--warning)' : 'var(--border-color)',
-        borderWidth: '1px',
-        borderStyle: 'solid',
-        borderRadius: 'var(--radius-md)',
-        padding: '12px 14px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        zIndex: 999
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }} aria-live="polite">
-          <span className="text-xs text-bold" style={{
-            color: isFlashing ? 'var(--warning-strong)' : 'var(--text-secondary)',
-            whiteSpace: 'nowrap'
-          }}>
-            {isFlashing ? 'REST COMPLETE' : 'RESTING'}
+    <div className={`rest-bar${isOver ? ' is-done' : ''}`}>
+      <div className="rest-bar-top">
+        <div className="rest-readout">
+          <span className="rest-time">
+            {isOver ? '0:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
           </span>
-          <span className="magnitude" style={{ fontSize: '26px' }}>
-            {isFlashing ? '0:00' : `${Math.floor(timerSeconds / 60)}:${String(timerSeconds % 60).padStart(2, '0')}`}
+          <span className="rest-label" aria-live="polite">
+            {isOver ? 'Rest over, next set' : 'Resting'}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => extendRestTimer(30)}
-            style={{ padding: '6px 10px', fontSize: '12px' }}
-          >
-            +30s
+        <div className="rest-actions">
+          <button type="button" className="rest-btn" onClick={() => extendRestTimer(30)}>
+            +30 s
           </button>
-          <button
-            type="button"
-            className="btn btn-danger btn-sm"
-            onClick={clearRestTimer}
-            style={{ padding: '6px 10px', fontSize: '12px' }}
-          >
-            Skip
+          <button type="button" className="rest-btn" onClick={clearRestTimer}>
+            {isOver ? 'Dismiss' : 'Skip'}
           </button>
         </div>
       </div>
-
-      {/* The rule. It shortens; nothing rotates and nothing pulses. When the
-          interval is over it fills out in fox rather than vanishing. */}
       <div
+        className="ticks rest-ticks"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round((isFlashing ? 1 : restRemaining) * 100)}
+        aria-valuenow={Math.round((isOver ? 1 : restRemaining) * 100)}
         aria-label="Rest remaining"
-        style={{ height: '2px', backgroundColor: 'var(--bg-secondary)', overflow: 'hidden' }}
       >
-        <div style={{
-          height: '100%',
-          width: `${(isFlashing ? 1 : restRemaining) * 100}%`,
-          backgroundColor: isFlashing ? 'var(--warning)' : 'var(--text-primary)',
-          transition: 'width 0.5s linear'
-        }} />
+        {Array.from({ length: REST_TICKS }, (_, i) => (
+          <span key={i} className={`tick${i < lit ? ' is-on' : ''}`} />
+        ))}
       </div>
+    </div>
+  );
+}
+
+// One graduation per set, grouped by exercise: a ruler of the whole session.
+// Ticked sets turn brass; warm-ups are the short marks.
+function SessionTicks({ exercises }) {
+  return (
+    <div className="session-ticks" aria-hidden="true">
+      {exercises.filter((ex) => ex.sets.length > 0).map((ex) => (
+        <span key={ex.exerciseId} className="session-ticks-group" style={{ flexGrow: ex.sets.length }}>
+          {ex.sets.map((s, i) => (
+            <span
+              key={i}
+              className={`tick${s.completed ? ' is-on' : ''}${s.isWarmup ? ' is-warmup' : ''}`}
+            />
+          ))}
+        </span>
+      ))}
     </div>
   );
 }
@@ -210,79 +198,59 @@ export default function WorkoutActive({
 
   if (!currentWorkout) {
     return (
-      <div className="tab-content" style={{ justifyContent: 'center', minHeight: '60vh' }}>
-        <div className="empty-state" style={{ width: '100%' }}>
-          <div style={{
-            background: 'var(--accent-glow)',
-            color: 'var(--accent-strong)',
-            padding: '20px',
-            borderRadius: '50%',
-            marginBottom: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <Dumbbell size={40} />
-          </div>
-          <h2>Start Training</h2>
-          <p className="text-muted text-center" style={{ maxWidth: '300px' }}>
-            Pick today&apos;s session. Weights, reps and volume are tracked in real time.
-          </p>
+      <div className="tab-content">
+        <p className="lead">
+          Pick a session. Every set is filled in from your best lifts, so you
+          only change what you beat.
+        </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '340px', marginTop: '10px' }}>
+        {routines.length > 0 && (
+          <div className="pick-list">
             {routines.map((routine) => {
               const daysSince = getDaysSinceRoutine(history, routine.id, now);
               const count = routine.exerciseIds?.length || 0;
-
               const lastLabel =
                 daysSince === null ? 'Not trained yet'
-                  : daysSince === 0 ? 'Trained today'
-                  : daysSince === 1 ? 'Trained yesterday'
+                  : daysSince === 0 ? 'Today'
+                  : daysSince === 1 ? 'Yesterday'
                   : `${daysSince} days ago`;
 
               return (
                 <button
                   key={routine.id}
-                  className="btn"
+                  type="button"
+                  className="pick-row routine-row"
                   onClick={() => startWorkout(routine.id)}
                   disabled={count === 0}
-                  style={{
-                    width: '100%',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '14px 16px',
-                    backgroundColor: 'var(--bg-secondary)',
-                    border: '1px solid var(--feather-200)',
-                    borderRadius: '12px',
-                    opacity: count === 0 ? 0.55 : 1,
-                    cursor: count === 0 ? 'not-allowed' : 'pointer'
-                  }}
+                  aria-label={`Start ${routine.name}: ${count === 0 ? 'no exercises yet' : `${count} exercise${count === 1 ? '' : 's'}`}, ${lastLabel.toLowerCase()}`}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
-                    <span style={{ fontSize: '15px', fontWeight: 600 }}>{routine.name}</span>
-                    <span className="text-xs text-muted">
-                      {count === 0 ? 'No exercises yet' : `${count} exercise${count === 1 ? '' : 's'} · ${lastLabel}`}
+                  <span className="pick-row-main">
+                    <span className="pick-row-name">{routine.name}</span>
+                    <span className="pick-row-meta">
+                      {count === 0 ? 'No exercises yet' : `${count} exercise${count === 1 ? '' : 's'}`}
                     </span>
-                  </div>
-                  <Play size={18} fill="currentColor" style={{ color: 'var(--accent-strong)', flexShrink: 0 }} />
+                  </span>
+                  <span className="pick-row-aside">{lastLabel}</span>
+                  <span className="start-dot" aria-hidden="true">
+                    <Play size={13} fill="currentColor" />
+                  </span>
                 </button>
               );
             })}
           </div>
+        )}
 
-          {routines.length === 0 && (
-            <button className="btn btn-primary" onClick={() => startWorkout()} style={{ width: '100%', maxWidth: '240px', marginTop: '10px' }}>
-              <Play size={18} fill="currentColor" /> Start Workout Session
-            </button>
-          )}
-
-          <button
-            className="btn btn-secondary"
-            onClick={startEmptyWorkout}
-            style={{ width: '100%', maxWidth: '340px', borderStyle: 'dashed', background: 'transparent' }}
-          >
-            <Plus size={16} /> Empty workout — pick exercises as you go
+        {routines.length === 0 && (
+          <button type="button" className="btn btn-primary btn-block" onClick={() => startWorkout()}>
+            <Play size={16} fill="currentColor" /> Start workout
           </button>
+        )}
+
+        <div className="empty-start">
+          <button type="button" className="btn btn-dashed btn-block" onClick={startEmptyWorkout}>
+            <Plus size={16} /> Empty workout
+          </button>
+          <p className="text-xs text-center">Start with nothing and add exercises as you go.</p>
         </div>
       </div>
     );
@@ -318,7 +286,7 @@ export default function WorkoutActive({
           particleCount: 120,
           spread: 70,
           origin: { y: 0.75 },
-          colors: ['#58CC02', '#1CB0F6', '#FFC800', '#FF4B4B']
+          colors: ['#DBB066', '#C9A04F', '#AF8433', '#F0DDB0', '#8B641A']
         });
       }
     } catch (err) {
@@ -383,59 +351,58 @@ export default function WorkoutActive({
   const effortMode = preferences.prefLoggingMode === 'RIR' ? 'RIR' : 'RPE';
 
   return (
-    <div className="tab-content" style={{ paddingBottom: restEndTime ? '172px' : '90px' }}>
-      {/* 1. Timer Banner */}
-      <div className="timer-banner">
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <span className="text-xs text-muted text-bold">DURATION</span>
-          <ElapsedClock startTime={currentWorkout.startTime} />
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-danger btn-sm" onClick={() => setShowCancelConfirm(true)} disabled={saving}>
-            Cancel
+    <div className="tab-content" style={restEndTime ? { paddingBottom: '104px' } : undefined}>
+      {/* Session head: the clock, the whole session as a ruler, and Finish */}
+      <section className="session-head" aria-label="Session">
+        <div className="session-head-top">
+          <div className="session-clock">
+            <ElapsedClock startTime={currentWorkout.startTime} />
+            <span className="session-sub">
+              {completion.total > 0
+                ? `${completion.logged} of ${completion.total} sets logged`
+                : 'No exercises yet'}
+            </span>
+          </div>
+          <button type="button" className="btn btn-success" onClick={requestFinish} disabled={saving}>
+            <Check size={16} strokeWidth={2.5} /> {saving ? 'Saving…' : 'Finish'}
           </button>
-          <button className="btn btn-success btn-sm" onClick={requestFinish} disabled={saving}>
-            <Check size={14} /> {saving ? 'Saving…' : 'Finish'}
-          </button>
         </div>
-      </div>
+        {completion.total > 0 && <SessionTicks exercises={currentWorkout.exercises} />}
+      </section>
 
       {saveError && (
-        <div role="alert" className="text-xs text-bold" style={{
-          color: 'var(--error-strong)',
-          backgroundColor: 'var(--error-glow)',
-          border: '1px solid var(--cardinal-200)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '10px 12px',
-          marginTop: '-6px'
-        }}>
-          {saveError}
+        <div role="alert" className="notice is-danger">
+          <span className="notice-text">{saveError}</span>
         </div>
       )}
 
-      {/* Progress, and reshaping today's workout. Changes here stay in this
-          workout; the saved session is edited in Settings. */}
+      {/* Reshaping today's workout. Changes here stay in this workout; the
+          saved session is edited in Settings. */}
       <div className="workout-toolbar">
-        <span className="text-xs text-muted" style={{ flex: 1, fontVariantNumeric: 'tabular-nums' }}>
-          {completion.total > 0
-            ? `${completion.logged} of ${completion.total} sets logged`
-            : 'No exercises yet'}
-        </span>
         {currentWorkout.exercises.length > 1 && (
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowReorder(true)}>
             <ArrowUpDown size={14} /> Reorder
           </button>
         )}
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPicker(true)}>
-          <Plus size={14} /> Add
+          <Plus size={14} /> Add exercise
+        </button>
+        <span className="toolbar-spacer" />
+        <button
+          type="button"
+          className="btn btn-quiet btn-sm is-danger"
+          onClick={() => setShowCancelConfirm(true)}
+          disabled={saving}
+        >
+          Discard
         </button>
       </div>
 
       {currentWorkout.exercises.length === 0 && (
-        <div className="card" style={{ alignItems: 'center', textAlign: 'center', padding: '28px 16px' }}>
-          <Dumbbell size={28} style={{ color: 'var(--text-muted)' }} />
+        <div className="card empty-card">
           <p className="text-muted" style={{ margin: 0 }}>
-            Add exercises from your list as you go — each one remembers what you did last time.
+            Add exercises from your list as you go. Each one remembers what you
+            did last time.
           </p>
           <button type="button" className="btn btn-primary" onClick={() => setShowPicker(true)}>
             <Plus size={16} /> Add exercise
@@ -443,7 +410,6 @@ export default function WorkoutActive({
         </div>
       )}
 
-      {/* 2. Exercises Logging List */}
       {currentWorkout.exercises.map((ex) => {
         const { suggestion, last, best, accretion, belowBest } = insights[ex.exerciseId] || {};
         const weightStep = stepFor(ex);
@@ -475,16 +441,20 @@ export default function WorkoutActive({
                 <span className="pick-row-name">{ex.name}</span>
                 <span className="pick-row-meta">{summarizeSets(ex.sets)}</span>
               </span>
-              <ChevronDown size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <ChevronDown size={18} className="row-chevron" />
             </button>
           );
         }
 
+        const hint = suggestion && suggestion.type !== 'initial' && suggestion.action
+          ? sentenceCase(suggestion.action)
+          : null;
+
         return (
-          <div key={ex.exerciseId} id={`exercise-${ex.exerciseId}`} className="card">
+          <div key={ex.exerciseId} id={`exercise-${ex.exerciseId}`} className="card exercise-card">
             <div className="exercise-log-header">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="card-title" style={{ fontSize: '16px' }}>
+              <div className="exercise-title-row">
+                <h3 className="exercise-title">
                   <button
                     type="button"
                     className="link-btn"
@@ -494,134 +464,96 @@ export default function WorkoutActive({
                     {ex.name}
                   </button>
                 </h3>
-                {/* Exercise type used to be a 4px colour bar down the whole
-                    card. It is one word — and a word costs no pigment. */}
-                <span className="text-xs text-bold text-muted" style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-color)',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {ex.muscleGroup} · {ex.exerciseType === 'isolation' ? 'Isolation' : 'Compound'}
-                </span>
                 {isDone && (
                   <button
                     type="button"
-                    className="link-btn"
+                    className="icon-btn is-quiet"
                     onClick={() => toggleDone(ex.exerciseId, false)}
                     aria-label={`Fold ${ex.name} away`}
-                    style={{ marginLeft: '6px', color: 'var(--text-muted)', display: 'flex' }}
                   >
                     <ChevronUp size={18} />
                   </button>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="exercise-meta">
+                <span className="tag">{ex.muscleGroup}</span>
+                <span className="tag">{ex.exerciseType === 'isolation' ? 'Isolation' : 'Compound'}</span>
                 <span className="rep-target-badge">
-                  Target: {ex.targetRange.min}–{ex.targetRange.max} reps
+                  {ex.targetRange.min}–{ex.targetRange.max} reps
                 </span>
-                {suggestion && suggestion.type !== 'initial' && (
-                  <span className="text-xs text-bold" style={{
-                    color: suggestion.type === 'weight' ? 'var(--success-strong)' : suggestion.type === 'hold' ? 'var(--accent-strong)' : 'var(--warning-strong)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '2px'
-                  }}>
-                    • Hint: {suggestion.action}
-                  </span>
-                )}
               </div>
+              {hint && (
+                <div className={`hint${suggestion.type === 'weight' ? ' is-brass' : ''}`}>
+                  {suggestion.type === 'hold'
+                    ? <Minus size={14} aria-hidden="true" />
+                    : <TrendingUp size={14} aria-hidden="true" />}
+                  {hint}
+                </div>
+              )}
             </div>
 
-            {/* Last session reference — your only rival is your past self */}
+            {/* Last session — your only rival is your past self */}
             {last && last.sets.length > 0 && (
-              <div style={{
-                backgroundColor: 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '8px 10px',
-                marginBottom: '10px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span className="text-xs text-bold" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--text-secondary)' }}>
-                    <Ghost size={13} /> Last time · {formatDate(last.timestamp)}
+              <div className="last-time">
+                <div className="last-time-head">
+                  <span title={formatDate(last.timestamp)}>
+                    Last time, <strong>{daysAgo(last.timestamp, now)}</strong>
                   </span>
-                  <span className="text-xs text-bold" style={{ color: 'var(--success-strong)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                    <TrendingUp size={12} /> Beat it
-                  </span>
+                  {best && (
+                    <span className="last-best">
+                      <Trophy size={12} aria-hidden="true" />
+                      Best <strong>{formatWeight(best.weight)} kg × {best.bestReps}</strong>
+                    </span>
+                  )}
                 </div>
 
-                {best && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                    <Trophy size={12} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} />
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                      Best · {formatWeight(best.weight)} kg × {best.bestReps}
-                    </span>
-                    {belowBest && (
-                      <span className="text-xs text-bold" style={{ color: 'var(--warning-strong)' }}>
-                        · last session was under this
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <div className="last-sets">
                   {last.sets.map((s, i) => {
                     const aim = repTarget(s.reps);
                     return (
-                      <span key={i} style={{
-                        fontSize: '11px',
-                        fontVariantNumeric: 'tabular-nums',
-                        backgroundColor: 'var(--bg-card)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '6px',
-                        padding: '3px 7px',
-                        color: 'var(--text-secondary)'
-                      }}>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{formatWeight(s.weight)}</span>×{s.reps}
+                      <div key={i} className="last-set">
+                        <span className="last-set-value">{formatWeight(s.weight)} × {s.reps}</span>
                         {aim
-                          ? <span style={{ color: 'var(--success-strong)' }}> → aim {aim}</span>
-                          : <span style={{ color: 'var(--warning-strong)' }}> → +{formatWeight(weightStep)}kg</span>}
-                      </span>
+                          ? <span className="last-set-aim">Aim {aim}</span>
+                          : <span className="last-set-aim is-brass">+{formatWeight(weightStep)} kg</span>}
+                      </div>
                     );
                   })}
                 </div>
 
+                {belowBest && (
+                  <span className="text-xs">Last session was under your best.</span>
+                )}
+
                 {/* Every session you have ever logged for this lift, as ticks.
-                    The green one is where the record was set. */}
+                    The brass one is where the record was set. */}
                 {accretion && accretion.points.length >= 2 && (
-                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-                    <AccretionStrip
-                      points={accretion.points}
-                      height={22}
-                      label={`${accretion.total} session${accretion.total === 1 ? '' : 's'}`}
-                    />
-                  </div>
+                  <AccretionStrip
+                    points={accretion.points}
+                    height={20}
+                    label={`${accretion.total} session${accretion.total === 1 ? '' : 's'}`}
+                  />
                 )}
               </div>
             )}
 
-            {/* Set Table header */}
-            <div className="set-grid set-grid-header" aria-hidden="true">
-              <span>SET</span>
-              <span>KG</span>
-              <span>REPS</span>
-              <span>{effortMode}</span>
-              <span>LOG</span>
-              <span></span>
-            </div>
+            {/* Set table */}
+            <div>
+              <div className="set-grid set-grid-header" aria-hidden="true">
+                <span>Set</span>
+                <span>kg</span>
+                <span>Reps</span>
+                <span>{effortMode}</span>
+                <span></span>
+                <span></span>
+              </div>
 
-            {/* Sets Inputs */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
               {ex.sets.map((set, idx) => {
                 const label = setLabels[idx];
                 const setName = set.isWarmup ? `Warm-up set` : `Set ${label}`;
                 return (
-                  <div key={idx} className="set-grid set-row" style={{
-                    opacity: set.completed ? 0.6 : 1,
-                    backgroundColor: set.completed ? 'var(--bg-secondary)' : 'transparent'
-                  }}>
-                    {/* 1. Set number — tap to toggle warm-up */}
+                  <div key={idx} className={`set-grid set-row${set.completed ? ' is-done' : ''}`}>
+                    {/* Set number — tap to toggle warm-up */}
                     <button
                       type="button"
                       className={`set-badge${set.isWarmup ? ' is-warmup' : ''}`}
@@ -633,7 +565,7 @@ export default function WorkoutActive({
                       {label}
                     </button>
 
-                    {/* 2. Weight Control */}
+                    {/* Weight */}
                     <div className="input-control">
                       <button
                         type="button"
@@ -658,7 +590,7 @@ export default function WorkoutActive({
                       </button>
                     </div>
 
-                    {/* 3. Reps Control */}
+                    {/* Reps */}
                     <div className="input-control">
                       <button
                         type="button"
@@ -689,8 +621,8 @@ export default function WorkoutActive({
                       </button>
                     </div>
 
-                    {/* 4. RPE/RIR Select — the column header names the scale,
-                        so an empty cell is just a dash. */}
+                    {/* RPE / RIR — the column header names the scale, so an
+                        empty cell is just a dash. */}
                     {effortMode === 'RPE' ? (
                       <select
                         value={set.rpe}
@@ -726,7 +658,7 @@ export default function WorkoutActive({
                       </select>
                     )}
 
-                    {/* 5. Checkmark Log Button */}
+                    {/* Log the set: the one round control, brass when ticked */}
                     <button
                       type="button"
                       className={`set-log${set.completed ? ' is-done' : ''}`}
@@ -734,10 +666,10 @@ export default function WorkoutActive({
                       aria-pressed={!!set.completed}
                       aria-label={set.completed ? `${setName} logged — tap to undo` : `Log ${setName.toLowerCase()}`}
                     >
-                      <Check size={16} strokeWidth={3} />
+                      <Check size={17} strokeWidth={3} />
                     </button>
 
-                    {/* 6. Remove Set */}
+                    {/* Remove set */}
                     <button
                       type="button"
                       className="set-remove"
@@ -751,28 +683,21 @@ export default function WorkoutActive({
               })}
             </div>
 
-            {/* Add Set button */}
             <div className="exercise-controls">
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className="btn btn-secondary btn-sm btn-block"
                 onClick={() => addSetToActive(ex.exerciseId)}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                <Plus size={14} /> Add Set
+                <Plus size={14} /> Add set
               </button>
             </div>
           </div>
         );
       })}
 
-      {/* 3. Add an exercise from the list */}
       {currentWorkout.exercises.length > 0 && (
-        <button
-          className="btn btn-secondary"
-          onClick={() => setShowPicker(true)}
-          style={{ borderStyle: 'dashed', background: 'transparent' }}
-        >
+        <button type="button" className="btn btn-dashed btn-block" onClick={() => setShowPicker(true)}>
           <Plus size={16} /> Add exercise
         </button>
       )}
@@ -846,9 +771,8 @@ export default function WorkoutActive({
           footer={(
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-dashed btn-block"
               onClick={() => { setShowReorder(false); setShowPicker(true); }}
-              style={{ borderStyle: 'dashed', background: 'transparent' }}
             >
               <Plus size={16} /> Add exercise
             </button>

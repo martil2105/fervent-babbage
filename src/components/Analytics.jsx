@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceArea
 } from 'recharts';
-import { TrendingUp, TrendingDown, Flame, Activity, Scale, Layers } from 'lucide-react';
+import { Flame, TrendingUp } from 'lucide-react';
+import ChartTooltip from './ChartTooltip';
 import {
   getExerciseProgression,
   getSessionAvgRpe,
@@ -16,6 +17,8 @@ import {
   orderExercisesByRoutines,
   MUSCLE_GROUPS
 } from '../utils/workoutHelpers';
+import { formatNumber } from '../utils/format';
+import { chartAnimation } from '../utils/motion';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -24,12 +27,10 @@ const HEATMAP_WEEKS = 12;
 const shortDate = (ts) =>
   new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-const tooltipStyle = {
-  backgroundColor: 'var(--bg-card)',
-  borderColor: 'var(--border-color)',
-  borderRadius: 'var(--radius-sm)',
-  fontSize: '12px'
-};
+const axisTick = { fill: 'var(--ink-3)', fontSize: 11 };
+
+// Signed percentage with a real minus sign
+const signedPct = (pct) => (pct > 0 ? `+${pct}%` : pct < 0 ? `−${Math.abs(pct)}%` : '0%');
 
 export default function Analytics({ history, exercises, routines = [] }) {
   // Chips in session order (Push's exercises, then Legs'), history-only
@@ -69,11 +70,11 @@ export default function Analytics({ history, exercises, routines = [] }) {
     return (
       <div className="tab-content">
         <div className="empty-state">
-          <Activity />
-          <h3>No Analytics Yet</h3>
-          <p className="text-muted text-center">
-            Complete a few workouts and this page will chart your strength progression,
-            training consistency, effort levels, and muscle balance.
+          <TrendingUp aria-hidden="true" />
+          <h2>Progress shows up here</h2>
+          <p className="text-muted">
+            After a few workouts this page charts your strength on each lift,
+            how consistently you train, how hard sessions feel, and your muscle balance.
           </p>
         </div>
       </div>
@@ -124,12 +125,13 @@ export default function Analytics({ history, exercises, routines = [] }) {
   const currentMonday = getMondayOfDate(new Date()).getTime();
   const heatmapStart = currentMonday - (HEATMAP_WEEKS - 1) * WEEK_MS;
 
-  const cellColor = (volume) => {
-    if (volume <= 0) return 'var(--bg-secondary)';
+  // One hue, light to dark: rest days are the empty step.
+  const heatLevel = (volume) => {
+    if (volume <= 0) return 0;
     const ratio = maxDayVolume > 0 ? volume / maxDayVolume : 1;
-    if (ratio <= 0.33) return 'var(--feather-200)';
-    if (ratio <= 0.66) return 'var(--feather-400)';
-    return 'var(--feather-600)';
+    if (ratio <= 0.33) return 1;
+    if (ratio <= 0.66) return 2;
+    return 3;
   };
 
   const heatmapWeeks = [];
@@ -177,201 +179,180 @@ export default function Analytics({ history, exercises, routines = [] }) {
     .filter((r) => r.sets > 0)
     .sort((a, b) => b.sets - a.sets);
 
+  const volumeValue = stats.totalVolume >= 10000
+    ? (stats.totalVolume / 1000).toFixed(1)
+    : formatNumber(stats.totalVolume);
+  const volumeUnit = stats.totalVolume >= 10000 ? 't' : 'kg';
+
   return (
     <div className="tab-content">
-      {/* 1. Lifetime stats */}
+      {/* 1. Lifetime */}
       <div className="analytics-summary-grid">
         <div className="metric-card">
-          <span className="text-xs text-muted text-bold">TOTAL WORKOUTS</span>
+          <span className="metric-label">Workouts</span>
           <div className="metric-value">{stats.sessionsCount}</div>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginTop: '8px' }}>
-            {stats.totalSets} sets · {stats.totalReps} reps
-          </span>
+          <span className="metric-caption">{formatNumber(stats.totalSets)} sets, {formatNumber(stats.totalReps)} reps</span>
         </div>
         <div className="metric-card">
-          <span className="text-xs text-muted text-bold">WEEK STREAK</span>
-          <div className="metric-value" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-            <Flame size={22} style={{ color: streak > 0 ? 'var(--sun-600)' : 'var(--text-muted)' }} />
+          <span className="metric-label">Week streak</span>
+          <div className="metric-value">
             {streak}
+            {streak > 0 && <Flame size={22} className="metric-flame" aria-hidden="true" />}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginTop: '8px' }}>
-            consecutive training weeks
-          </span>
+          <span className="metric-caption">weeks in a row with training</span>
         </div>
         <div className="metric-card">
-          <span className="text-xs text-muted text-bold">LIFETIME VOLUME</span>
-          <div className="metric-value">
-            {stats.totalVolume >= 10000
-              ? (stats.totalVolume / 1000).toFixed(1)
-              : Math.round(stats.totalVolume)}
-            <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-              {' '}{stats.totalVolume >= 10000 ? 't' : 'kg'}
-            </span>
-          </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginTop: '8px' }}>
-            completed working sets
-          </span>
+          <span className="metric-label">Lifetime volume</span>
+          <div className="metric-value">{volumeValue}<span className="unit">{volumeUnit}</span></div>
+          <span className="metric-caption">completed working sets</span>
         </div>
         <div className="metric-card">
-          <span className="text-xs text-muted text-bold">AVG SESSION</span>
-          <div className="metric-value">
-            {stats.avgDuration}
-            <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}> min</span>
-          </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginTop: '8px' }}>
-            across logged durations
-          </span>
+          <span className="metric-label">Average session</span>
+          <div className="metric-value">{stats.avgDuration}<span className="unit">min</span></div>
+          <span className="metric-caption">across logged durations</span>
         </div>
       </div>
 
       {/* 2. Strength progression */}
-      <div className="card" style={{ padding: '16px 8px 12px 8px' }}>
-        <h4 className="chart-title" style={{ margin: '0 0 4px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <TrendingUp size={16} style={{ color: 'var(--accent-strong)' }} />
-          Strength Progression
-        </h4>
-        <p className="text-xs text-muted" style={{ margin: '0 0 10px 16px' }}>
-          Heaviest set and estimated 1RM (Epley) per session.
-        </p>
+      <div className="card chart-card">
+        <div className="card-head">
+          <h3 className="card-title">Strength</h3>
+          <span className="card-sub">Heaviest set and estimated 1RM (Epley) per session</span>
+        </div>
 
-        {/* Exercise selector chips */}
-        <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', padding: '0 8px 10px 8px', WebkitOverflowScrolling: 'touch' }}>
-          {displayExercises.map((ex) => {
-            const isActive = ex.id === activeId;
-            return (
-              <button
-                key={ex.id}
-                onClick={() => setSelectedId(ex.id)}
-                style={{
-                  flexShrink: 0,
-                  padding: '6px 12px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  fontFamily: 'inherit',
-                  borderRadius: '20px',
-                  cursor: 'pointer',
-                  border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-color)'}`,
-                  backgroundColor: isActive ? 'var(--accent-glow)' : 'var(--bg-card)',
-                  color: isActive ? 'var(--accent-strong)' : 'var(--text-secondary)'
-                }}
-              >
-                {ex.name}
-              </button>
-            );
-          })}
+        {/* Exercise selector */}
+        <div className="chart-chips" role="group" aria-label="Exercise">
+          {displayExercises.map((ex) => (
+            <button
+              key={ex.id}
+              type="button"
+              className="chip"
+              aria-pressed={ex.id === activeId}
+              onClick={() => setSelectedId(ex.id)}
+            >
+              {ex.name}
+            </button>
+          ))}
         </div>
 
         {chartData.length >= 2 ? (
           <>
-            <div style={{ width: '100%', height: 200 }}>
+            <div className="chart-legend">
+              <span className="chart-legend-item">
+                <span className="chart-swatch is-line" style={{ '--swatch': 'var(--series-1)' }} aria-hidden="true" />
+                Top set
+              </span>
+              <span className="chart-legend-item">
+                <span className="chart-swatch is-dashed" style={{ '--swatch': 'var(--series-2)' }} aria-hidden="true" />
+                Estimated 1RM
+              </span>
+            </div>
+            <div className="chart-box" style={{ height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 10, right: 12, left: -20, bottom: 0 }}>
-                  <CartesianGrid stroke="var(--border-color)" vertical={false} />
-                  <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="var(--hairline)" vertical={false} />
+                  <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={16} />
+                  <YAxis tick={axisTick} tickLine={false} axisLine={false} width={36} domain={['auto', 'auto']} />
                   <Tooltip
-                    contentStyle={tooltipStyle}
-                    labelStyle={{ color: 'var(--text-secondary)', fontWeight: 600 }}
-                    itemStyle={{ fontWeight: 600 }}
-                    formatter={(value, name) => [
-                      `${value} kg`,
-                      name === 'topWeight' ? 'Top Set' : 'Est. 1RM'
-                    ]}
+                    cursor={{ stroke: 'var(--hairline-strong)', strokeWidth: 1 }}
+                    content={(
+                      <ChartTooltip
+                        rows={(payload) => [
+                          ...payload.filter((p) => p.dataKey === 'topWeight').map((p) => ({
+                            key: 'top', name: 'Top set', value: `${p.value} kg`, color: 'var(--series-1)'
+                          })),
+                          ...payload.filter((p) => p.dataKey === 'est1RM').map((p) => ({
+                            key: 'est', name: 'Est. 1RM', value: `${p.value} kg`, color: 'var(--series-2)', dashed: true
+                          }))
+                        ]}
+                      />
+                    )}
                   />
-                  <Legend
-                    wrapperStyle={{ fontSize: '11px' }}
-                    formatter={(value) => (value === 'topWeight' ? 'Top set weight' : 'Estimated 1RM')}
-                  />
-                  <Line type="monotone" dataKey="est1RM" stroke="var(--macaw-500)" strokeWidth={2} strokeDasharray="5 3" dot={false} />
-                  <Line type="monotone" dataKey="topWeight" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3, fill: 'var(--accent)' }} />
+                  <Line {...chartAnimation} type="monotone" dataKey="est1RM" stroke="var(--series-2)" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4, stroke: 'var(--surface)', strokeWidth: 2 }} />
+                  <Line {...chartAnimation} type="monotone" dataKey="topWeight" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3, fill: 'var(--series-1)', stroke: 'var(--surface)', strokeWidth: 1.5 }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
-            {/* Progress summary row */}
-            <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '10px', padding: '10px 8px 4px 8px', borderTop: '1px solid var(--border-color)' }}>
-              <div style={{ textAlign: 'center' }}>
-                <span className="text-xs text-muted text-bold">BEST EST. 1RM</span>
-                <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{best1RM} kg</div>
+            <div className="stat-row card-divider">
+              <div className="stat">
+                <span className="stat-label">Best est. 1RM</span>
+                <span className="stat-value">{best1RM}<span className="unit">kg</span></span>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <span className="text-xs text-muted text-bold">LATEST TOP SET</span>
-                <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{latest.topWeight} kg</div>
+              <div className="stat">
+                <span className="stat-label">Latest top set</span>
+                <span className="stat-value">{latest.topWeight}<span className="unit">kg</span></span>
               </div>
               {changePct !== null && (
-                <div style={{ textAlign: 'center' }}>
-                  <span className="text-xs text-muted text-bold">SINCE FIRST LOG</span>
-                  <div style={{
-                    fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px',
-                    color: changePct > 0 ? 'var(--success-strong)' : changePct < 0 ? 'var(--error-strong)' : 'var(--text-secondary)'
-                  }}>
-                    {changePct > 0 ? <TrendingUp size={15} /> : changePct < 0 ? <TrendingDown size={15} /> : null}
-                    {changePct > 0 ? '+' : ''}{changePct}%
-                  </div>
+                <div className="stat">
+                  <span className="stat-label">Since first log</span>
+                  <span className={`stat-value${changePct > 0 ? ' is-brass' : changePct < 0 ? ' is-danger' : ''}`}>
+                    {signedPct(changePct)}
+                  </span>
                 </div>
               )}
             </div>
           </>
         ) : (
-          <div className="text-center text-muted" style={{ padding: '32px 16px', fontSize: '13px' }}>
+          <p className="chart-empty">
             {activeExercise
               ? `Log ${activeExercise.name} in at least two sessions to see its progression.`
               : 'No exercises configured yet.'}
-          </div>
+          </p>
         )}
       </div>
 
       {/* 3. Volume load (work-done twin of the strength panel above) */}
       {volumeData.length >= 2 && (
-        <div className="card" style={{ padding: '16px 8px 12px 8px' }}>
-          <h4 className="chart-title" style={{ margin: '0 0 4px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Layers size={16} style={{ color: 'var(--accent-strong)' }} />
-            Volume Load
-          </h4>
-          <p className="text-xs text-muted" style={{ margin: '0 0 10px 16px' }}>
-            Total weight × reps per session{activeExercise ? ` for ${activeExercise.name}` : ''} —
-            counts every working set, so extra reps on your back-off sets show up here
-            even when the top set is unchanged. Switch exercise with the chips above.
-          </p>
+        <div className="card chart-card">
+          <div className="card-head">
+            <h3 className="card-title">Volume load{activeExercise ? `, ${activeExercise.name}` : ''}</h3>
+            <span className="card-sub">
+              Weight × reps over every working set, per session. Extra reps on
+              back-off sets show up here even when the top set doesn&apos;t move.
+            </span>
+          </div>
 
-          <div style={{ width: '100%', height: 160 }}>
+          <div className="chart-box" style={{ height: 160 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={volumeData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }} barCategoryGap="20%">
-                <CartesianGrid stroke="var(--border-color)" vertical={false} />
-                <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} width={48} />
-                <Tooltip
-                  cursor={{ fill: 'var(--bg-secondary)' }}
-                  contentStyle={tooltipStyle}
-                  labelStyle={{ color: 'var(--text-secondary)', fontWeight: 600 }}
-                  itemStyle={{ fontWeight: 600 }}
-                  formatter={(value) => [`${value} kg`, 'Volume load']}
+              <BarChart data={volumeData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="22%">
+                <CartesianGrid stroke="var(--hairline)" vertical={false} />
+                <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={16} />
+                <YAxis
+                  tick={axisTick}
+                  tickLine={false}
+                  axisLine={false}
+                  width={36}
+                  tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : v)}
                 />
-                <Bar dataKey="volume" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+                <Tooltip
+                  cursor={{ fill: 'var(--surface-2)' }}
+                  content={(
+                    <ChartTooltip
+                      rows={(payload) => [{ key: 'v', name: 'Volume load', value: `${formatNumber(payload[0].value)} kg`, color: 'var(--series-1)' }]}
+                    />
+                  )}
+                />
+                <Bar {...chartAnimation} dataKey="volume" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Volume summary row */}
-          <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '10px', padding: '10px 8px 4px 8px', borderTop: '1px solid var(--border-color)' }}>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-xs text-muted text-bold">BEST SESSION</span>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(bestVolume)} kg</div>
+          <div className="stat-row card-divider">
+            <div className="stat">
+              <span className="stat-label">Best session</span>
+              <span className="stat-value">{formatNumber(bestVolume)}<span className="unit">kg</span></span>
             </div>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-xs text-muted text-bold">LATEST</span>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(latest.volume)} kg</div>
+            <div className="stat">
+              <span className="stat-label">Latest</span>
+              <span className="stat-value">{formatNumber(latest.volume)}<span className="unit">kg</span></span>
             </div>
             {volumeChangePct !== null && (
-              <div style={{ textAlign: 'center' }}>
-                <span className="text-xs text-muted text-bold">SINCE FIRST LOG</span>
-                <div style={{
-                  fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px',
-                  color: volumeChangePct > 0 ? 'var(--success-strong)' : volumeChangePct < 0 ? 'var(--error-strong)' : 'var(--text-secondary)'
-                }}>
-                  {volumeChangePct > 0 ? <TrendingUp size={15} /> : volumeChangePct < 0 ? <TrendingDown size={15} /> : null}
-                  {volumeChangePct > 0 ? '+' : ''}{volumeChangePct}%
-                </div>
+              <div className="stat">
+                <span className="stat-label">Since first log</span>
+                <span className={`stat-value${volumeChangePct > 0 ? ' is-brass' : volumeChangePct < 0 ? ' is-danger' : ''}`}>
+                  {signedPct(volumeChangePct)}
+                </span>
               </div>
             )}
           </div>
@@ -380,102 +361,98 @@ export default function Analytics({ history, exercises, routines = [] }) {
 
       {/* 4. Consistency heatmap */}
       <div className="card">
-        <h4 className="chart-title" style={{ margin: '0 0 4px 0', paddingLeft: 0 }}>Training Consistency</h4>
-        <p className="text-xs text-muted" style={{ margin: '0 0 12px 0' }}>
-          Last {HEATMAP_WEEKS} weeks · darker = more volume that day.
-        </p>
-        <div style={{ display: 'flex', gap: '3px', justifyContent: 'space-between' }}>
+        <div className="card-head">
+          <h3 className="card-title">Consistency</h3>
+          <span className="card-sub">The last {HEATMAP_WEEKS} weeks. Darker days moved more weight.</span>
+        </div>
+        <div className="heatmap" role="img" aria-label={`Training days over the last ${HEATMAP_WEEKS} weeks`}>
+          <span aria-hidden="true" />
+          {['Mon', '', 'Wed', '', 'Fri', '', 'Sun'].map((d, i) => (
+            <span key={`day-${i}`} className="heatmap-day" aria-hidden="true">{d}</span>
+          ))}
           {heatmapWeeks.map((week) => (
-            <div key={week.weekStart} style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: '9px', color: 'var(--text-muted)', height: '12px', overflow: 'visible', whiteSpace: 'nowrap' }}>
-                {week.monthLabel || ''}
-              </span>
+            <Fragment key={week.weekStart}>
+              <span className="heatmap-month" aria-hidden="true">{week.monthLabel || ''}</span>
               {week.days.map((day) => (
                 <div
                   key={day.ts}
-                  title={`${shortDate(day.ts)} · ${day.volume > 0 ? `${Math.round(day.volume)} kg` : 'rest'}`}
-                  style={{
-                    width: '100%',
-                    aspectRatio: '1',
-                    borderRadius: '3px',
-                    backgroundColor: day.isFuture ? 'transparent' : cellColor(day.volume),
-                    border: day.isFuture ? '1px dashed var(--border-color)' : 'none',
-                    boxSizing: 'border-box'
-                  }}
+                  title={`${shortDate(day.ts)}: ${day.volume > 0 ? `${formatNumber(day.volume)} kg` : 'rest'}`}
+                  className={`heat-cell${day.isFuture ? ' is-future' : ` l${heatLevel(day.volume)}`}`}
                 />
               ))}
-            </div>
+            </Fragment>
           ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', marginTop: '10px' }}>
-          <span className="text-xs text-muted">Less</span>
-          {['var(--bg-secondary)', 'var(--feather-200)', 'var(--feather-400)', 'var(--feather-600)'].map((c) => (
-            <span key={c} style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: c, display: 'inline-block' }} />
-          ))}
-          <span className="text-xs text-muted">More</span>
+        <div className="heatmap-legend" aria-hidden="true">
+          <span>Rest</span>
+          {[0, 1, 2, 3].map((l) => <span key={l} className={`heat-cell l${l}`} />)}
+          <span>Most</span>
         </div>
       </div>
 
       {/* 5. Effort trend */}
-      <div className="card" style={{ padding: '16px 8px 12px 8px' }}>
-        <h4 className="chart-title" style={{ margin: '0 0 4px 8px' }}>Effort Trend</h4>
-        <p className="text-xs text-muted" style={{ margin: '0 0 10px 16px' }}>
-          Average RPE per session (RIR converted). Most hypertrophy work lands around RPE 7–9.
-        </p>
+      <div className="card chart-card">
+        <div className="card-head">
+          <h3 className="card-title">Effort</h3>
+          <span className="card-sub">
+            Average RPE per session (RIR converted). The shaded band, RPE 7–9, is
+            where most hypertrophy work lands.
+          </span>
+        </div>
         {rpeData.length >= 2 ? (
-          <div style={{ width: '100%', height: 150 }}>
+          <div className="chart-box" style={{ height: 150 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={rpeData} margin={{ top: 10, right: 12, left: -25, bottom: 0 }}>
-                <CartesianGrid stroke="var(--border-color)" vertical={false} />
-                <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--text-secondary)" fontSize={10} tickLine={false} axisLine={false} domain={[5, 10]} tickCount={6} />
+              <LineChart data={rpeData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="var(--hairline)" vertical={false} />
+                <ReferenceArea y1={7} y2={9} fill="var(--surface-2)" fillOpacity={1} ifOverflow="hidden" />
+                <XAxis dataKey="label" tick={axisTick} tickLine={false} axisLine={false} minTickGap={16} />
+                <YAxis tick={axisTick} tickLine={false} axisLine={false} width={36} domain={[5, 10]} tickCount={6} />
                 <Tooltip
-                  contentStyle={tooltipStyle}
-                  labelStyle={{ color: 'var(--text-secondary)', fontWeight: 600 }}
-                  itemStyle={{ color: 'var(--warning-strong)', fontWeight: 600 }}
-                  formatter={(value) => [`RPE ${value}`, 'Session avg']}
+                  cursor={{ stroke: 'var(--hairline-strong)', strokeWidth: 1 }}
+                  content={(
+                    <ChartTooltip
+                      rows={(payload) => [{ key: 'r', name: 'Session average', value: `RPE ${payload[0].value}`, color: 'var(--series-1)' }]}
+                    />
+                  )}
                 />
-                <Line type="monotone" dataKey="avgRpe" stroke="var(--warning)" strokeWidth={2} dot={{ r: 3, fill: 'var(--warning)' }} />
+                <Line {...chartAnimation} type="monotone" dataKey="avgRpe" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3, fill: 'var(--series-1)', stroke: 'var(--surface)', strokeWidth: 1.5 }} activeDot={{ r: 5, stroke: 'var(--surface)', strokeWidth: 2 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="text-center text-muted" style={{ padding: '24px 16px', fontSize: '13px' }}>
+          <p className="chart-empty">
             Log RPE or RIR on your sets to track how hard your sessions feel over time.
-          </div>
+          </p>
         )}
       </div>
 
       {/* 6. Muscle balance */}
       <div className="card">
-        <h4 className="chart-title" style={{ margin: '0 0 4px 0', paddingLeft: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Scale size={16} style={{ color: 'var(--accent-strong)' }} />
-          Muscle Balance
-        </h4>
-        <p className="text-xs text-muted" style={{ margin: '0 0 12px 0' }}>
-          Share of working sets over the last 4 weeks.
-        </p>
+        <div className="card-head">
+          <h3 className="card-title">Muscle balance</h3>
+          <span className="card-sub">Share of working sets over the last 4 weeks</span>
+        </div>
         {balanceRows.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div className="balance-list">
             {balanceRows.map(({ mg, sets }) => {
               const pct = Math.round((sets / totalBalanceSets) * 100);
               return (
-                <div key={mg}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{mg}</span>
-                    <span className="text-xs text-muted">{sets} sets · {pct}%</span>
+                <div key={mg} className="balance-row">
+                  <div className="balance-row-head">
+                    <span className="balance-name">{mg}</span>
+                    <span className="balance-figures">
+                      {sets} sets <strong>{pct}%</strong>
+                    </span>
                   </div>
-                  <div style={{ height: '6px', backgroundColor: 'var(--bg-secondary)', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', backgroundColor: 'var(--accent)', borderRadius: '3px' }} />
+                  <div className="balance-track">
+                    <div className="balance-fill" style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               );
             })}
           </div>
         ) : (
-          <div className="text-center text-muted" style={{ padding: '16px', fontSize: '13px' }}>
-            No working sets logged in the last 4 weeks.
-          </div>
+          <p className="chart-empty">No working sets logged in the last 4 weeks.</p>
         )}
       </div>
     </div>

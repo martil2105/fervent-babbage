@@ -4,13 +4,13 @@ import AccretionStrip from './AccretionStrip';
 import ExercisePicker from './ExercisePicker';
 import ConfirmDialog from './ConfirmDialog';
 import {
-  formatDate,
   formatWeight,
   getAllTimeBest,
   getAccretionSeries,
   getEstimated1RM,
   getExerciseHistory
 } from '../utils/workoutHelpers';
+import { sessionDate, formatNumber } from '../utils/format';
 
 /**
  * Everything logged for one exercise: best, trend strip, and every session
@@ -33,6 +33,7 @@ export default function ExerciseDetail({
   const [picking, setPicking] = useState(false);
   const [mergeTarget, setMergeTarget] = useState(null);
   const [merging, setMerging] = useState(false);
+  const [now] = useState(() => Date.now());
 
   const sessions = useMemo(() => getExerciseHistory(exerciseId, history), [exerciseId, history]);
   const best = useMemo(() => getAllTimeBest(exerciseId, history), [exerciseId, history]);
@@ -53,7 +54,7 @@ export default function ExerciseDetail({
 
   const routineNames = routines.filter((r) => (r.exerciseIds || []).includes(entry.id)).map((r) => r.name);
   const where = routineNames.length
-    ? `In ${routineNames.join(' & ')}`
+    ? `In ${routineNames.join(' and ')}`
     : entry.inLibrary ? 'Not in a session' : 'Only in history';
   const loggedCount = sessions.filter((s) => s.logged).length;
 
@@ -73,11 +74,13 @@ export default function ExerciseDetail({
     <div className="sheet-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={entry.name}>
         <div className="sheet-header">
-          <div style={{ minWidth: 0 }}>
-            <h2 className="sheet-title">{entry.name}</h2>
-            <span className="text-xs text-muted">
-              {entry.muscleGroup || 'Other'} · {entry.exerciseType === 'isolation' ? 'Isolation' : 'Compound'} · {where}
-            </span>
+          <div className="sheet-heading">
+            <h2 className="sheet-title is-wrapping">{entry.name}</h2>
+            <div className="sheet-sub">
+              <span className="tag">{entry.muscleGroup || 'Other'}</span>
+              <span className="tag">{entry.exerciseType === 'isolation' ? 'Isolation' : 'Compound'}</span>
+              <span>{where}</span>
+            </div>
           </div>
           <button type="button" className="sheet-close" onClick={onClose} aria-label="Close">
             <X size={18} />
@@ -85,82 +88,92 @@ export default function ExerciseDetail({
         </div>
 
         <div className="sheet-body">
-          <div className="analytics-summary-grid">
-            <div className="metric-card" style={{ padding: '12px' }}>
-              <span className="text-xs text-muted text-bold">BEST SET</span>
-              <div className="metric-value" style={{ fontSize: '26px' }}>
-                {best ? formatWeight(best.weight) : '–'}
-                {best && <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}> kg × {best.bestReps}</span>}
+          <div className="card">
+            <div className="stat-row">
+              <div className="stat">
+                <span className="stat-label">Best set</span>
+                <span className="stat-value">
+                  {best ? formatWeight(best.weight) : '–'}
+                  {best && <span className="unit">kg × {best.bestReps}</span>}
+                </span>
+                <span className="stat-caption">{best ? sessionDate(best.timestamp, now) : 'Nothing logged yet'}</span>
               </div>
-              <span className="text-xs text-muted" style={{ display: 'block', marginTop: '6px' }}>
-                {best ? formatDate(best.timestamp) : 'nothing logged yet'}
-              </span>
+              <div className="stat">
+                <span className="stat-label">Est. 1RM</span>
+                <span className="stat-value">
+                  {best1RM > 0 ? formatWeight(best1RM) : '–'}
+                  {best1RM > 0 && <span className="unit">kg</span>}
+                </span>
+                <span className="stat-caption">All-time best</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">Sessions</span>
+                <span className="stat-value">{loggedCount}</span>
+                <span className="stat-caption">logged</span>
+              </div>
             </div>
-            <div className="metric-card" style={{ padding: '12px' }}>
-              <span className="text-xs text-muted text-bold">SESSIONS</span>
-              <div className="metric-value" style={{ fontSize: '26px' }}>{loggedCount}</div>
-              <span className="text-xs text-muted" style={{ display: 'block', marginTop: '6px' }}>
-                {best1RM > 0 ? `est. 1RM ${formatWeight(best1RM)} kg` : '—'}
-              </span>
-            </div>
+            {accretion.points.length >= 2 && (
+              <div className="card-divider">
+                <AccretionStrip points={accretion.points} height={24} label="Top set by session" />
+              </div>
+            )}
           </div>
 
-          {accretion.points.length >= 2 && (
-            <div className="card" style={{ padding: '12px 14px' }}>
-              <AccretionStrip points={accretion.points} height={26} label="Top set, recent sessions" />
-            </div>
-          )}
-
-          <div className="list-section-label">History</div>
-          {sessions.length === 0 ? (
-            <p className="text-xs text-muted text-center">No sessions yet.</p>
-          ) : (
-            <div className="pick-list">
-              {sessions.map((s) => {
-                const isBestSession = best && s.timestamp === best.timestamp;
-                return (
-                  <div key={s.sessionId} className="pick-row" style={{ cursor: 'default', alignItems: 'flex-start', flexDirection: 'column', gap: '6px', opacity: s.logged ? 1 : 0.55 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-                      <span className="text-bold" style={{ fontSize: '13px' }}>{formatDate(s.timestamp)}</span>
-                      {s.routineName && <span className="text-xs text-muted">{s.routineName}</span>}
-                      {isBestSession && (
-                        <span className="text-xs text-bold" style={{ color: 'var(--success-strong)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          <Trophy size={12} /> best
-                        </span>
-                      )}
-                      <span className="text-xs text-muted" style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
-                        {s.logged ? `${Math.round(s.volume).toLocaleString()} kg` : 'skipped'}
-                      </span>
-                    </div>
-                    <div className="history-detail-sets">
-                      {s.sets.map((set, i) => {
-                        const skipped = set.completed === false;
-                        return (
-                          <span
-                            key={i}
-                            className="history-detail-set-badge"
-                            style={set.isWarmup || skipped ? { opacity: 0.5, fontStyle: 'italic' } : undefined}
-                          >
-                            {formatWeight(set.weight)}×{set.reps}{set.isWarmup ? ' W' : ''}
+          <section className="list-section">
+            <h3 className="list-section-label">Sessions</h3>
+            {sessions.length === 0 ? (
+              <p className="text-xs text-center">No sessions yet.</p>
+            ) : (
+              <div className="pick-list">
+                {sessions.map((s) => {
+                  const isBestSession = best && s.timestamp === best.timestamp;
+                  return (
+                    <div key={s.sessionId} className={`detail-row${s.logged ? '' : ' is-skipped'}`}>
+                      <div className="detail-row-head">
+                        <span className="detail-row-date">{sessionDate(s.timestamp, now)}</span>
+                        {s.routineName && <span className="detail-row-routine">{s.routineName}</span>}
+                        {isBestSession && (
+                          <span className="tag is-brass">
+                            <Trophy size={11} aria-hidden="true" /> Best
                           </span>
-                        );
-                      })}
+                        )}
+                        <span className="detail-row-volume">
+                          {s.logged ? `${formatNumber(s.volume)} kg` : 'Skipped'}
+                        </span>
+                      </div>
+                      <div className="set-chips">
+                        {s.sets.map((set, i) => {
+                          const skipped = set.completed === false;
+                          return (
+                            <span
+                              key={i}
+                              className={`set-chip${set.isWarmup ? ' is-warmup' : ''}${skipped ? ' is-skipped' : ''}`}
+                              title={set.isWarmup ? 'Warm-up (not counted)' : skipped ? 'Not logged (not counted)' : undefined}
+                            >
+                              {set.isWarmup && <span className="set-chip-w" aria-hidden="true">W</span>}
+                              {set.isWarmup && <span className="visually-hidden">Warm-up, </span>}
+                              {formatWeight(set.weight)} × {set.reps}
+                              {skipped && <span className="visually-hidden">, skipped</span>}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
           {onMerge && (
-            <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setPicking(true)} style={{ justifyContent: 'flex-start' }}>
-                <GitMerge size={16} /> Merge into another exercise…
+            <div className="merge-block">
+              <button type="button" className="btn btn-secondary btn-block btn-start" onClick={() => setPicking(true)}>
+                <GitMerge size={16} /> Merge into another exercise
               </button>
-              <span className="text-xs text-muted">
-                For a duplicate: moves this exercise&apos;s history onto the one you pick,
-                so they count as one lift.
-              </span>
+              <p className="text-xs" style={{ margin: 0 }}>
+                For a duplicate: moves this exercise&apos;s history onto the one you
+                pick, so they count as one lift.
+              </p>
             </div>
           )}
         </div>

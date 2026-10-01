@@ -28,15 +28,13 @@ export default function ReorderSheet({
           </button>
         </div>
         <div className="sheet-body">
-          {subtitle && <p className="text-xs text-muted" style={{ margin: 0 }}>{subtitle}</p>}
+          {subtitle && <p className="sheet-lead">{subtitle}</p>}
 
           {items.length > 0 ? (
             <div className="pick-list">
               {items.map((item, i) => (
-                <div key={item.id} className="pick-row" style={{ cursor: 'default' }}>
-                  <span className="text-xs text-muted" style={{ width: '16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                    {i + 1}
-                  </span>
+                <div key={item.id} className="pick-row reorder-row">
+                  <span className="reorder-index" aria-hidden="true">{i + 1}</span>
                   <span className="pick-row-main">
                     <span className="pick-row-name">{item.name}</span>
                     {item.meta && <span className="pick-row-meta">{item.meta}</span>}
@@ -62,10 +60,9 @@ export default function ReorderSheet({
                   {onRemove && (
                     <button
                       type="button"
-                      className="icon-btn"
+                      className="icon-btn is-danger"
                       onClick={() => onRemove(item.id)}
                       aria-label={`${removeLabel} ${item.name}`}
-                      style={{ color: 'var(--error-strong)' }}
                     >
                       {removeLabel === 'Remove' ? <X size={16} /> : <Trash2 size={15} />}
                     </button>
@@ -74,7 +71,7 @@ export default function ReorderSheet({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted text-center">Nothing here yet.</p>
+            <p className="text-xs text-center">Nothing here yet.</p>
           )}
 
           {footer}

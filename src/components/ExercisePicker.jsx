@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search, X, ChevronRight } from 'lucide-react';
+import { Plus, Search, X, ChevronRight, Check } from 'lucide-react';
 import {
   searchExercises,
   findMatchingExercise,
@@ -9,18 +9,7 @@ import {
   guessExerciseType
 } from '../utils/exerciseLibrary';
 import { getLastSessionSets, summarizeSets, SELECTABLE_MUSCLE_GROUPS } from '../utils/workoutHelpers';
-
-const DAY_MS = 86400000;
-
-const ago = (ts, now) => {
-  if (!ts) return null;
-  const days = Math.max(0, Math.floor((now - ts) / DAY_MS));
-  if (days === 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 14) return `${days} days ago`;
-  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
-  return `${Math.round(days / 30)} months ago`;
-};
+import { daysAgo } from '../utils/format';
 
 /**
  * Pick an exercise from everything the app knows — so a lift is always the
@@ -76,11 +65,7 @@ export default function ExercisePicker({
     return out;
   }, [trimmed, visible, routines]);
 
-  const lastText = (entry) => {
-    const last = getLastSessionSets(entry.id, history);
-    if (!last) return 'Not logged yet';
-    return `${summarizeSets(last.sets)} · ${ago(last.timestamp, now)}`;
-  };
+  const lastOf = (entry) => getLastSessionSets(entry.id, history);
 
   const pick = async (entry) => {
     if (busy || excluded.has(entry.id)) return;
@@ -117,6 +102,8 @@ export default function ExercisePicker({
 
   const row = (entry, { note } = {}) => {
     const inWorkout = excluded.has(entry.id);
+    const last = lastOf(entry);
+    const when = last ? daysAgo(last.timestamp, now) : null;
     return (
       <button
         key={entry.id}
@@ -126,14 +113,25 @@ export default function ExercisePicker({
         disabled={inWorkout || busy}
       >
         <span className="pick-row-main">
-          <span className="pick-row-name">{entry.name}</span>
+          <span className="pick-row-name">
+            {entry.name}
+            {note && <>{' '}<span className="tag is-brass">{note}</span></>}
+          </span>
           <span className="pick-row-meta">
-            {note ? `${note} · ` : ''}{entry.muscleGroup || 'Other'} · {lastText(entry)}
+            <span className="meta-quiet">{entry.muscleGroup || 'Other'}</span>{' '}
+            {last ? summarizeSets(last.sets) : 'Not logged yet'}
           </span>
         </span>
-        {inWorkout
-          ? <span className="text-xs text-muted" style={{ flexShrink: 0 }}>In workout</span>
-          : <ChevronRight size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
+        {inWorkout ? (
+          <span className="pick-row-aside is-added">
+            <Check size={14} strokeWidth={2.5} /> Added
+          </span>
+        ) : (
+          <>
+            {when && <span className="pick-row-aside">{when}</span>}
+            <ChevronRight size={16} className="row-chevron" />
+          </>
+        )}
       </button>
     );
   };
@@ -154,7 +152,7 @@ export default function ExercisePicker({
 
         <div className="sheet-body">
           {draft ? (
-            <form onSubmit={submitCreate} className="card" style={{ gap: '14px' }}>
+            <form onSubmit={submitCreate} className="card form-card">
               <div className="form-group">
                 <label htmlFor="new-ex-name">Name</label>
                 <input
@@ -169,7 +167,7 @@ export default function ExercisePicker({
                   const m = findMatchingExercise(draft.name, visible);
                   if (m.exact) {
                     return (
-                      <span className="text-xs" style={{ color: 'var(--warning-strong)' }}>
+                      <span className="field-note is-ember">
                         You already have “{m.exact.name}” — saving picks that one.
                       </span>
                     );
@@ -202,23 +200,23 @@ export default function ExercisePicker({
                   </select>
                 </div>
               </div>
-              <p className="text-xs text-muted" style={{ margin: 0 }}>
+              <p className="text-xs" style={{ margin: 0 }}>
                 It goes into your exercise list, so next time you can pick it and it
                 remembers what you did. Sets, reps and rest can be changed in Settings.
               </p>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft(null)} disabled={busy}>
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setDraft(null)} disabled={busy}>
                   Back
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !draft.name.trim()}>
+                <button type="submit" className="btn btn-primary" disabled={busy || !draft.name.trim()}>
                   {busy ? 'Adding…' : 'Create & add'}
                 </button>
               </div>
             </form>
           ) : (
             <>
-              <div className="input-search" style={{ position: 'relative' }}>
-                <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <div className="input-search">
+                <Search size={17} className="input-search-icon" aria-hidden="true" />
                 <input
                   type="search"
                   className="form-input"
@@ -228,30 +226,39 @@ export default function ExercisePicker({
                   autoFocus
                   enterKeyHint="search"
                   aria-label="Search exercises"
-                  style={{ width: '100%', paddingLeft: '36px' }}
                 />
+                {query && (
+                  <button
+                    type="button"
+                    className="input-search-clear"
+                    onClick={() => setQuery('')}
+                    aria-label="Clear search"
+                  >
+                    <X size={14} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
 
               {trimmed ? (
                 <>
                   {match.similar.length > 0 && (
                     <>
-                      <div className="list-section-label">Did you mean</div>
+                      <h3 className="list-section-label">Did you mean</h3>
                       <div className="pick-list">{match.similar.map((e) => row(e))}</div>
                     </>
                   )}
                   {otherResults.length > 0 && (
                     <>
-                      {match.similar.length > 0 && <div className="list-section-label">Matches</div>}
+                      {match.similar.length > 0 && <h3 className="list-section-label">Matches</h3>}
                       <div className="pick-list">
                         {otherResults.map((e) => row(e, { note: match.exact?.id === e.id ? 'Same exercise' : null }))}
                       </div>
                     </>
                   )}
                   {canCreate && (
-                    <button type="button" className="btn btn-secondary" onClick={startCreate} style={{ justifyContent: 'flex-start' }}>
+                    <button type="button" className="btn btn-dashed btn-block btn-start" onClick={startCreate}>
                       <Plus size={16} />
-                      {results.length ? `None of these — create “${tidyExerciseName(trimmed)}”` : `Create “${tidyExerciseName(trimmed)}”`}
+                      {results.length ? `Create “${tidyExerciseName(trimmed)}” as a new exercise` : `Create “${tidyExerciseName(trimmed)}”`}
                     </button>
                   )}
                   {!canCreate && results.length === 0 && (
@@ -260,10 +267,10 @@ export default function ExercisePicker({
                 </>
               ) : (
                 groups.length > 0 ? groups.map((g) => (
-                  <div key={g.label} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div className="list-section-label">{g.label}</div>
+                  <section key={g.label} className="list-section">
+                    <h3 className="list-section-label">{g.label}</h3>
                     <div className="pick-list">{g.items.map((e) => row(e))}</div>
-                  </div>
+                  </section>
                 )) : (
                   <p className="text-xs text-muted text-center">
                     No exercises yet — type a name above to create your first.
