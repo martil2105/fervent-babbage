@@ -7,16 +7,19 @@
     <title>Hypertrophy Log</title>
     
     <!-- PWA & iOS Meta Tags -->
-    <!-- Matches --surface-canvas / --bg-primary in the Verdant light theme.
-         Keep in sync with the PWA manifest theme_color in vite.config.js. -->
-    <meta name="theme-color" content="#F7F8FA" />
+    <!-- The browser bar matches the page canvas in each theme (--canvas in
+         src/theme/tokens.css). The manifest in vite.config.js carries the
+         light value, for the splash screen. -->
+    <meta name="theme-color" content="#F1F2F4" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="HypLog" />
     <!-- iOS ignores SVG touch icons; it needs a PNG (180x180, opaque). -->
     <link rel="apple-touch-icon" sizes="180x180" href="/fervent-babbage/apple-touch-icon.png" />
-    <script type="module" crossorigin src="/fervent-babbage/assets/index-i3It5i4n.js"></script>
-    <link rel="stylesheet" crossorigin href="/fervent-babbage/assets/index-BWa5I1LS.css">
+    <script type="module" crossorigin src="/fervent-babbage/assets/index-DUYN2qXq.js"></script>
+    <link rel="stylesheet" crossorigin href="/fervent-babbage/assets/index-CzTnp_1M.css">
   <link rel="manifest" href="/fervent-babbage/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/fervent-babbage/registerSW.js"></script></head>
   <body>
     <div id="root"></div>
