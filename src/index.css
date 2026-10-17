@@ -2968,6 +2968,43 @@ select.form-input {
 .inline-status.is-brass { color: var(--brass-text); }
 .inline-status.is-danger { color: var(--danger-text); }
 
+/* GitHub backup setup */
+.github-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.setup-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.setup-steps strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.setup-steps a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.github-conflict {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
 /* ---- Notices: something to know, in a tinted block ------------------------------- */
 
 .notice {

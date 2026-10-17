@@ -22,11 +22,29 @@ import {
   isBackupDue,
   ensureWritePermission
 } from '../utils/autoBackup';
+import {
+  GITHUB_CONFIG_KEY,
+  GITHUB_STATUS_KEY,
+  checkRepo,
+  pushBackup,
+  fetchRemoteBackup,
+  backupFingerprint,
+  parseRepo,
+  GithubBackupError
+} from '../utils/githubBackup';
 
 // The backup folder handle is a live browser object, not data. It lives in the
 // preferences table so it survives restarts, but it must never be written into
 // an export payload — JSON.stringify would silently turn it into `{}`.
 const BACKUP_HANDLE_KEY = 'backupFolderHandle';
+
+// Preferences that describe this device's backup setup rather than the log.
+// Never exported (the GitHub token above all — an exported file gets shared),
+// and carried across an import so restoring doesn't switch backups off.
+const DEVICE_ONLY_PREFS = [BACKUP_HANDLE_KEY, GITHUB_CONFIG_KEY, GITHUB_STATUS_KEY];
+
+// How often app open / return-to-app may check whether GitHub is behind.
+const GITHUB_RECHECK_MS = 2 * 60 * 1000;
 
 // localStorage keys for the in-progress session. The workout itself lives here
 // rather than in IndexedDB until it's finished; App reads the first key to
@@ -58,9 +76,121 @@ const readStoredInt = (key) => {
 const toPlainPreferences = (entries) => {
   const prefs = {};
   entries.forEach((p) => {
-    if (p.key !== BACKUP_HANDLE_KEY) prefs[p.key] = p.value;
+    if (!DEVICE_ONLY_PREFS.includes(p.key)) prefs[p.key] = p.value;
   });
   return prefs;
+};
+
+// Everything a backup holds, read straight from the database rather than the
+// live queries: this runs right after writes the live queries haven't caught.
+const readBackupPayload = async () => {
+  const [exs, hist, prefEntries, rts] = await Promise.all([
+    db.exercises.toArray(),
+    db.history.toArray(),
+    db.preferences.toArray(),
+    db.routines.toArray()
+  ]);
+  return {
+    exercises: exs,
+    history: hist,
+    preferences: toPlainPreferences(prefEntries),
+    routines: rts
+  };
+};
+
+// --- Automatic backup to GitHub -----------------------------------------------
+//
+// Module-level rather than inside the hook: it only touches the database, and
+// one queue has to serialise every caller (finishing a workout, reopening the
+// app, coming back online) so two pushes never race for the same file.
+
+const readPref = async (key) => (await db.preferences.get(key))?.value;
+
+let githubQueue = Promise.resolve();
+let lastGithubCheckAt = 0;
+
+const syncToGithubNow = async ({ always = false, overwrite = false } = {}) => {
+  const config = await readPref(GITHUB_CONFIG_KEY);
+  if (!config?.token) return { status: 'off' };
+
+  const status = (await readPref(GITHUB_STATUS_KEY)) || {};
+  const payload = await readBackupPayload();
+  const fingerprint = backupFingerprint(payload);
+
+  // Nothing changed since the last save there: no request at all, which is
+  // what makes checking on every app open free. After a failed attempt it
+  // tries anyway, so the error clears itself once GitHub is reachable again.
+  if (!always && !overwrite && status.syncedSha && !status.error && status.fingerprint === fingerprint) {
+    return { status: 'unchanged' };
+  }
+
+  let result;
+  try {
+    result = await pushBackup({ config, payload, syncedSha: status.syncedSha || null, overwrite });
+  } catch (err) {
+    result = {
+      status: 'error',
+      code: err instanceof GithubBackupError ? err.code : 'http',
+      httpStatus: err?.httpStatus ?? null
+    };
+  }
+
+  // Turned off while the request was in flight: don't leave state behind.
+  if (!(await readPref(GITHUB_CONFIG_KEY))) return { status: 'off' };
+
+  const now = Date.now();
+  if (result.status === 'pushed') {
+    await db.preferences.bulkPut([
+      { key: GITHUB_STATUS_KEY, value: { syncedSha: result.sha, fingerprint, lastSuccessAt: now, error: null } },
+      { key: 'lastBackupAt', value: now }
+    ]);
+  } else if (result.status === 'conflict') {
+    await db.preferences.put({
+      key: GITHUB_STATUS_KEY,
+      value: {
+        ...status,
+        error: 'conflict',
+        errorAt: now,
+        conflict: { lost: result.lost, sessions: result.remoteSummary.sessions, lastAt: result.remoteSummary.lastAt }
+      }
+    });
+  } else {
+    await db.preferences.put({
+      key: GITHUB_STATUS_KEY,
+      value: { ...status, error: result.code, errorStatus: result.httpStatus, errorAt: now, conflict: null }
+    });
+  }
+  return result;
+};
+
+/**
+ * Save the log to GitHub if it changed since the last save there. Never
+ * throws — it runs in the background, and a failed backup must never look
+ * like a failed workout save; failures are recorded for Settings instead.
+ *
+ * { always } saves even when unchanged (the "Back up now" button).
+ * { overwrite } replaces GitHub's copy even if it holds workouts this device
+ * doesn't — only ever from the person explicitly choosing that.
+ *
+ * Resolves to { status: 'off' | 'unchanged' | 'pushed' | 'conflict' | 'error', … }.
+ */
+// After restoring from GitHub: this device now matches the copy with `sha`.
+const markGithubSynced = async (sha) => {
+  const payload = await readBackupPayload();
+  const now = Date.now();
+  await db.preferences.bulkPut([
+    { key: GITHUB_STATUS_KEY, value: { syncedSha: sha, fingerprint: backupFingerprint(payload), lastSuccessAt: now, error: null } },
+    { key: 'lastBackupAt', value: now }
+  ]);
+};
+
+const syncToGithub = (options) => {
+  const run = githubQueue.then(() => syncToGithubNow(options));
+  githubQueue = run.catch(() => {});
+  return run.catch((err) => {
+    console.warn('GitHub backup failed:', err);
+    return { status: 'error', code: 'http' };
+  });
 };
 
 // Default exercises backup list (for reset/seeding fallback)
@@ -353,25 +483,8 @@ export const useWorkoutState = () => {
 
   // --- Automatic backup ----------------------------------------------------
 
-  // Read straight from the database rather than the live queries: this runs
-  // immediately after a workout is written, and the live query hasn't caught up.
-  const buildBackupPayload = async () => {
-    const [exs, hist, prefEntries, rts] = await Promise.all([
-      db.exercises.toArray(),
-      db.history.toArray(),
-      db.preferences.toArray(),
-      db.routines.toArray()
-    ]);
-    return {
-      exercises: exs,
-      history: hist,
-      preferences: toPlainPreferences(prefEntries),
-      routines: rts
-    };
-  };
-
   const writeBackupNow = async (handle) => {
-    const payload = await buildBackupPayload();
+    const payload = await readBackupPayload();
     const name = await writeBackup(handle, payload);
     if (name) await db.preferences.put({ key: 'lastBackupAt', value: Date.now() });
     return name;
@@ -403,6 +516,100 @@ export const useWorkoutState = () => {
     if (!(await ensureWritePermission(handle))) return null;
 
     return writeBackupNow(handle);
+  };
+
+  // GitHub: check on open, on coming back to the app, and on reconnecting.
+  // Each check is free unless the log changed (see syncToGithubNow), so this
+  // also catches up a push that was cut off — finishing a workout with no
+  // signal in the gym, or closing the app before the upload finished.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (now - lastGithubCheckAt < GITHUB_RECHECK_MS) return;
+      lastGithubCheckAt = now;
+      syncToGithub();
+    };
+    const onOnline = () => {
+      lastGithubCheckAt = 0;
+      check();
+    };
+    // Give startup (migrations, the first live queries) a moment first.
+    const timer = setTimeout(check, 3000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('online', onOnline);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('online', onOnline);
+    };
+  }, []);
+
+  // Connect a repo: check the token can see it, save the setup, then back up
+  // straight away so it's proven rather than assumed. If the repo already has
+  // a backup with workouts this device lacks (a new phone, a reset), that
+  // first save is refused and Settings offers to restore it instead.
+  const connectGithubBackup = async ({ repo, token }) => {
+    const parsed = parseRepo(repo);
+    if (!parsed) return { status: 'error', code: 'bad-repo' };
+    const cleanToken = (token || '').trim();
+    if (!cleanToken) return { status: 'error', code: 'no-token' };
+
+    let info;
+    try {
+      info = await checkRepo({ ...parsed, token: cleanToken });
+    } catch (err) {
+      return { status: 'error', code: err?.code || 'http', httpStatus: err?.httpStatus ?? null };
+    }
+
+    const [owner, name] = (info.fullName || '').split('/');
+    await db.preferences.bulkPut([
+      {
+        key: GITHUB_CONFIG_KEY,
+        value: { owner: owner || parsed.owner, repo: name || parsed.repo, token: cleanToken, isPrivate: info.isPrivate }
+      },
+      { key: GITHUB_STATUS_KEY, value: {} }
+    ]);
+
+    lastGithubCheckAt = Date.now();
+    const result = await syncToGithub({ always: true });
+    // A token that can't write (or stopped working) isn't a setup worth
+    // keeping: undo it so the form can show what to fix.
+    if (result.status === 'error' && ['read-only', 'bad-token', 'no-access'].includes(result.code)) {
+      await db.preferences.bulkDelete([GITHUB_CONFIG_KEY, GITHUB_STATUS_KEY]);
+    }
+    return result;
+  };
+
+  const disconnectGithubBackup = async () => {
+    await db.preferences.bulkDelete([GITHUB_CONFIG_KEY, GITHUB_STATUS_KEY]);
+  };
+
+  const backUpToGithubNow = () => syncToGithub({ always: true });
+
+  // The person chose to replace GitHub's copy with this device's data.
+  const replaceGithubBackup = () => syncToGithub({ overwrite: true });
+
+  // Fetch and check the backup in the repo, for the restore confirmation.
+  // Returns { ok: true, data, summary, sha } or { ok: false, code }.
+  const fetchGithubBackup = async () => {
+    const config = await readPref(GITHUB_CONFIG_KEY);
+    if (!config?.token) return { ok: false, code: 'off' };
+    try {
+      return { ok: true, ...(await fetchRemoteBackup(config)) };
+    } catch (err) {
+      return { ok: false, code: err?.code || 'http', httpStatus: err?.httpStatus ?? null };
+    }
+  };
+
+  // Restore a fetched GitHub backup, then record that this device now matches
+  // that copy — so the next save writes over it normally rather than seeing
+  // a copy it didn't write.
+  const restoreFromGithub = async (data, sha) => {
+    const ok = await importData(data);
+    if (!ok) return false;
+    await markGithubSynced(sha);
+    return true;
   };
 
   // Rest Timer controls
@@ -610,6 +817,8 @@ export const useWorkoutState = () => {
     // we're inside a user gesture, which is when file writes are permitted.
     // Best-effort — a failed backup must never look like a failed save.
     maybeAutoBackup().catch((err) => console.warn('Automatic backup failed:', err));
+    lastGithubCheckAt = Date.now();
+    syncToGithub();
 
     return completedSession;
   };
@@ -647,12 +856,14 @@ export const useWorkoutState = () => {
     }
 
     await db.history.update(sessionId, changes);
+    syncToGithub();
   };
 
   // Remove a session from history entirely — for a test session, a duplicate,
   // or one finished by accident. The UI confirms before calling this.
   const deleteHistorySession = async (sessionId) => {
     await db.history.delete(sessionId);
+    syncToGithub();
   };
 
   // Edit active workout sets.
@@ -989,16 +1200,16 @@ export const useWorkoutState = () => {
           });
         }
         if (parsed.preferences) {
-          // The backup folder is device configuration, not restorable data —
-          // carry it across so restoring a backup doesn't silently disable
-          // future backups.
-          const keptHandle = await db.preferences.get(BACKUP_HANDLE_KEY);
+          // The backup folder and the GitHub setup are device configuration,
+          // not restorable data — carry them across so restoring a backup
+          // doesn't silently disable future backups.
+          const kept = (await db.preferences.bulkGet(DEVICE_ONLY_PREFS)).filter(Boolean);
           await db.preferences.clear();
           const prefArray = Object.entries(parsed.preferences)
-            .filter(([key]) => key !== BACKUP_HANDLE_KEY)
+            .filter(([key]) => !DEVICE_ONLY_PREFS.includes(key))
             .map(([key, value]) => ({ key, value }));
           await db.preferences.bulkPut(prefArray);
-          if (keptHandle) await db.preferences.put(keptHandle);
+          if (kept.length > 0) await db.preferences.bulkPut(kept);
         }
       });
       return true;
@@ -1069,6 +1280,20 @@ export const useWorkoutState = () => {
     requestPersistentStorage,
     chooseBackupFolder,
     forgetBackupFolder,
-    backupFolderName: preferences?.[BACKUP_HANDLE_KEY]?.name || null
+    backupFolderName: preferences?.[BACKUP_HANDLE_KEY]?.name || null,
+    // The token stays in here; the UI only ever gets the repo's name.
+    githubRepo: preferences?.[GITHUB_CONFIG_KEY]
+      ? {
+          fullName: `${preferences[GITHUB_CONFIG_KEY].owner}/${preferences[GITHUB_CONFIG_KEY].repo}`,
+          isPrivate: !!preferences[GITHUB_CONFIG_KEY].isPrivate
+        }
+      : null,
+    githubStatus: preferences?.[GITHUB_STATUS_KEY] || null,
+    connectGithubBackup,
+    disconnectGithubBackup,
+    backUpToGithubNow,
+    replaceGithubBackup,
+    fetchGithubBackup,
+    restoreFromGithub
   };
 };

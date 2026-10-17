@@ -15,6 +15,7 @@ import {
 import AccretionStrip from './AccretionStrip';
 import ChartTooltip from './ChartTooltip';
 import { isBackupDue, daysSinceBackup } from '../utils/autoBackup';
+import { PERSISTENT_ERRORS } from '../utils/githubBackup';
 import { formatNumber, sentenceCase } from '../utils/format';
 import { chartAnimation } from '../utils/motion';
 
@@ -40,7 +41,17 @@ function SetScale({ count }) {
   );
 }
 
-export default function Dashboard({ history, exercises, routines = [], lastBackupAt, exportData, hasBackupFolder }) {
+export default function Dashboard({
+  history,
+  exercises,
+  routines = [],
+  lastBackupAt,
+  exportData,
+  hasBackupFolder,
+  githubRepo,
+  githubStatus,
+  onOpenSettings
+}) {
   const [breakdownView, setBreakdownView] = useState('muscleGroups'); // 'muscleGroups' | 'exercises'
   const [backupDismissed, setBackupDismissed] = useState(false);
 
@@ -67,10 +78,45 @@ export default function Dashboard({ history, exercises, routines = [], lastBacku
   // has never thought about backups will never look. An unbacked-up log is the
   // only unrecoverable state in the app, so it earns space on the main screen.
   const backupOverdue =
-    !hasBackupFolder && !backupDismissed && isBackupDue(lastBackupAt, nowTs, 7);
+    !hasBackupFolder && !githubRepo && !backupDismissed && isBackupDue(lastBackupAt, nowTs, 7);
   const backupAgeDays = daysSinceBackup(lastBackupAt, nowTs);
 
-  const backupBanner = backupOverdue ? (
+  // Automatic backups that have stopped are worse than none: the person
+  // believes they're covered. Only problems they have to fix show here (an
+  // expired token, a conflict) — no signal at the gym just retries quietly.
+  const githubError = githubRepo ? githubStatus?.error : null;
+  const githubBroken = !backupDismissed && PERSISTENT_ERRORS.includes(githubError);
+
+  const githubBanner = githubBroken ? (
+    <div className="notice is-ember" role="status">
+      <ShieldAlert size={18} className="notice-icon" aria-hidden="true" />
+      <div className="notice-body">
+        <span className="notice-title">
+          {githubError === 'conflict' ? 'GitHub has workouts this phone doesn’t' : 'Automatic backup has stopped'}
+        </span>
+        <span className="notice-text">
+          {githubError === 'conflict'
+            ? 'Your backup there wasn’t replaced. Choose what to keep in Settings.'
+            : githubError === 'bad-token'
+              ? 'GitHub stopped accepting the token. It has probably expired.'
+              : 'GitHub isn’t accepting backups from this app any more.'}
+        </span>
+        <button type="button" className="btn btn-secondary btn-sm notice-action" onClick={onOpenSettings}>
+          Open Settings
+        </button>
+      </div>
+      <button
+        type="button"
+        className="notice-dismiss"
+        onClick={() => setBackupDismissed(true)}
+        aria-label="Dismiss backup warning"
+      >
+        <X size={15} />
+      </button>
+    </div>
+  ) : null;
+
+  const backupBanner = githubBanner || (backupOverdue ? (
     <div className="notice is-ember" role="status">
       <ShieldAlert size={18} className="notice-icon" aria-hidden="true" />
       <div className="notice-body">
@@ -93,11 +139,14 @@ export default function Dashboard({ history, exercises, routines = [], lastBacku
         <X size={15} />
       </button>
     </div>
-  ) : null;
+  ) : null);
 
   if (!history || history.length === 0) {
+    // A new or reset phone with a log waiting on GitHub: say so here, since
+    // an empty summary is exactly when restoring is the thing to do.
     return (
       <div className="tab-content">
+        {githubBanner}
         <div className="empty-state">
           <Gauge aria-hidden="true" />
           <h2>Your week starts here</h2>

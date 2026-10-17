@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle, ArrowUpDown, GitMerge } from 'lucide-react';
+import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle, ArrowUpDown, GitMerge, CloudUpload, CloudAlert } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import ReorderSheet from './ReorderSheet';
 import { findMatchingExercise, findDuplicateExerciseGroups } from '../utils/exerciseLibrary';
@@ -12,6 +12,7 @@ import {
 } from '../utils/workoutHelpers';
 import { isSupported as backupFolderSupported } from '../utils/autoBackup';
 import { parseBackup, summarizeSessions, countSessionsLostByRestore } from '../utils/backupFile';
+import { describeGithubError, PERSISTENT_ERRORS } from '../utils/githubBackup';
 import {
   notificationsSupported,
   notificationPermission,
@@ -40,6 +41,14 @@ export default function Settings({
   chooseBackupFolder,
   forgetBackupFolder,
   backupFolderName,
+  githubRepo,
+  githubStatus,
+  connectGithubBackup,
+  disconnectGithubBackup,
+  backUpToGithubNow,
+  replaceGithubBackup,
+  fetchGithubBackup,
+  restoreFromGithub,
   catalog = [],
   ensureInLibrary,
   mergeExercises,
@@ -80,6 +89,14 @@ export default function Settings({
   const [routineDraftName, setRoutineDraftName] = useState('');
   const [newRoutineName, setNewRoutineName] = useState('');
   const [choosingFolder, setChoosingFolder] = useState(false);
+
+  // GitHub backup setup
+  const [githubFormOpen, setGithubFormOpen] = useState(false);
+  const [githubRepoInput, setGithubRepoInput] = useState('');
+  const [githubTokenInput, setGithubTokenInput] = useState('');
+  const [githubBusy, setGithubBusy] = useState(null); // 'connect' | 'backup' | 'restore' | 'replace'
+  const [githubNote, setGithubNote] = useState(null); // { kind: 'ok' | 'error', text }
+  const [confirmGithubReplace, setConfirmGithubReplace] = useState(false);
 
   // Permission is read once into state: Notification.permission is a live
   // browser value, and reading it during render would be impure.
@@ -131,11 +148,19 @@ export default function Settings({
   };
 
   const lastBackupAt = preferences?.lastBackupAt || null;
-  const backupAgeDays = lastBackupAt ? Math.floor((nowTs - lastBackupAt) / 86400000) : null;
-  const backupStale = backupAgeDays === null || backupAgeDays >= 7;
-  const backupLabel = lastBackupAt
-    ? backupAgeDays === 0 ? 'Last backup: today' : `Last backup: ${backupAgeDays} day${backupAgeDays === 1 ? '' : 's'} ago`
-    : 'No backup yet';
+  // Clamped: a backup made while this screen is open is newer than nowTs.
+  const backupAgeDays = lastBackupAt ? Math.max(0, Math.floor((nowTs - lastBackupAt) / 86400000)) : null;
+  const backupAge = backupAgeDays === 0 ? 'today' : `${backupAgeDays} day${backupAgeDays === 1 ? '' : 's'} ago`;
+
+  // With GitHub connected and working, an old date only means nothing has
+  // changed since — GitHub already holds the latest, so that isn't stale.
+  const githubError = githubRepo ? githubStatus?.error || null : null;
+  const githubHealthy = !!githubRepo && !!githubStatus?.syncedSha && !githubError;
+  const githubConflict = githubError === 'conflict' ? githubStatus?.conflict : null;
+  const backupStale = githubHealthy ? false : backupAgeDays === null || backupAgeDays >= 7;
+  const backupLabel = githubHealthy
+    ? `Backed up to GitHub, last saved ${backupAge}`
+    : lastBackupAt ? `Last backup: ${backupAge}` : 'No backup yet';
 
   const startEditing = (ex) => {
     setEditingId(ex.id);
@@ -259,7 +284,9 @@ export default function Settings({
   const confirmImport = async () => {
     if (!pendingImport) return;
     setImporting(true);
-    const success = await importData(pendingImport.data);
+    const success = pendingImport.source === 'github'
+      ? await restoreFromGithub(pendingImport.data, pendingImport.sha)
+      : await importData(pendingImport.data);
     setImporting(false);
     setPendingImport(null);
     if (success) flashImportStatus('success');
@@ -307,6 +334,78 @@ export default function Settings({
     setChoosingFolder(true);
     await chooseBackupFolder();
     setChoosingFolder(false);
+  };
+
+  // --- GitHub backup -------------------------------------------------------
+
+  // What a save/connect result means for the person, as a one-line note.
+  // A conflict needs no note: the conflict box below says it with buttons.
+  const noteFor = (result, okText) => {
+    if (result.status === 'pushed') return { kind: 'ok', text: okText };
+    if (result.status === 'unchanged') return { kind: 'ok', text: 'GitHub already has the latest.' };
+    if (result.status === 'error') return { kind: 'error', text: describeGithubError(result.code, result.httpStatus) };
+    return null;
+  };
+
+  const handleGithubConnect = async (e) => {
+    e.preventDefault();
+    setGithubBusy('connect');
+    setGithubNote(null);
+    const result = await connectGithubBackup({ repo: githubRepoInput, token: githubTokenInput });
+    setGithubBusy(null);
+    if (result.status === 'pushed' || result.status === 'conflict') {
+      // Don't keep the token around in the form once it's stored.
+      setGithubTokenInput('');
+      setGithubFormOpen(false);
+    }
+    // At setup a rejected token is far likelier mistyped than expired.
+    setGithubNote(result.status === 'error' && result.code === 'bad-token'
+      ? { kind: 'error', text: 'GitHub didn’t accept that token. Check you copied all of it.' }
+      : noteFor(result, 'Connected. Your first backup is on GitHub.'));
+  };
+
+  const handleGithubBackupNow = async () => {
+    setGithubBusy('backup');
+    setGithubNote(null);
+    const result = await backUpToGithubNow();
+    setGithubBusy(null);
+    setGithubNote(noteFor(result, 'Saved to GitHub.'));
+  };
+
+  // Fetch first, then reuse the import confirmation: it already shows what
+  // the backup holds and what restoring would throw away.
+  const handleGithubRestore = async () => {
+    setGithubBusy('restore');
+    setGithubNote(null);
+    const result = await fetchGithubBackup();
+    setGithubBusy(null);
+    if (!result.ok) {
+      setGithubNote({ kind: 'error', text: describeGithubError(result.code, result.httpStatus) });
+      return;
+    }
+    setPendingImport({ data: result.data, summary: result.summary, fileName: 'GitHub', source: 'github', sha: result.sha });
+  };
+
+  const handleGithubReplace = async () => {
+    setGithubBusy('replace');
+    setGithubNote(null);
+    const result = await replaceGithubBackup();
+    setGithubBusy(null);
+    setConfirmGithubReplace(false);
+    setGithubNote(noteFor(result, 'GitHub now has this phone’s data.'));
+  };
+
+  const handleGithubDisconnect = async () => {
+    setGithubNote(null);
+    await disconnectGithubBackup();
+  };
+
+  // An expired or wrong token: start over with the repo already filled in.
+  const handleGithubReconnect = async () => {
+    setGithubNote(null);
+    setGithubRepoInput(githubRepo?.fullName || '');
+    await disconnectGithubBackup();
+    setGithubFormOpen(true);
   };
 
   return (
@@ -967,17 +1066,185 @@ export default function Settings({
             </div>
           )}
 
-          {/* Automatic backups to a folder on disk */}
+          {/* Automatic backups to a private GitHub repo — the one automatic
+              option that works on an iPhone, where web apps can't save files */}
+          <div className="settings-row has-rule">
+            {githubError && githubError !== 'offline' && githubError !== 'rate-limited'
+              ? <CloudAlert size={18} className="settings-row-icon is-ember" aria-hidden="true" />
+              : <CloudUpload size={18} className={`settings-row-icon${githubHealthy ? ' is-brass' : ''}`} aria-hidden="true" />}
+            <div className="settings-row-main">
+              <span className="settings-row-title">Automatic backup to GitHub</span>
+
+              {githubRepo ? (
+                <>
+                  <span className="settings-row-sub">
+                    Saving to <strong>{githubRepo.fullName}</strong> after every workout. The
+                    repo’s history keeps every earlier backup too.
+                  </span>
+                  {!githubRepo.isPrivate && (
+                    <span className="field-note is-ember">
+                      This repo is public, so anyone can see your workouts. Make it private
+                      in the repo’s settings on GitHub.
+                    </span>
+                  )}
+
+                  {githubConflict ? (
+                    <div className="github-conflict">
+                      <span className="field-note is-ember">
+                        GitHub has a backup with {githubConflict.lost} workout
+                        {githubConflict.lost === 1 ? '' : 's'} that {githubConflict.lost === 1 ? 'isn’t' : 'aren’t'} on
+                        this phone{githubConflict.lastAt ? ` (latest ${formatDate(githubConflict.lastAt)})` : ''}, so
+                        it wasn’t replaced. Restore it, or replace it with what’s here.
+                      </span>
+                      <div className="settings-row-buttons">
+                        <button type="button" className="btn btn-primary btn-sm" disabled={!!githubBusy} onClick={handleGithubRestore}>
+                          {githubBusy === 'restore' ? 'Loading…' : 'Restore from GitHub'}
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={!!githubBusy} onClick={() => setConfirmGithubReplace(true)}>
+                          Replace with this phone’s data
+                        </button>
+                      </div>
+                    </div>
+                  ) : githubError && !githubNote ? (
+                    PERSISTENT_ERRORS.includes(githubError) ? (
+                      <div role="alert" className="inline-status is-danger">
+                        <X size={15} strokeWidth={2.5} aria-hidden="true" />
+                        {describeGithubError(githubError, githubStatus?.errorStatus)}
+                      </div>
+                    ) : (
+                      <span className="field-note">{describeGithubError(githubError, githubStatus?.errorStatus)}</span>
+                    )
+                  ) : null}
+
+                  {!githubConflict && (
+                    <div className="settings-row-buttons">
+                      {['bad-token', 'read-only', 'no-access'].includes(githubError) ? (
+                        <button type="button" className="btn btn-primary btn-sm" disabled={!!githubBusy} onClick={handleGithubReconnect}>
+                          Connect again
+                        </button>
+                      ) : (
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={!!githubBusy} onClick={handleGithubBackupNow}>
+                          {githubBusy === 'backup' ? 'Saving…' : 'Back up now'}
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={!!githubBusy} onClick={handleGithubRestore}>
+                        {githubBusy === 'restore' ? 'Loading…' : 'Restore'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={!!githubBusy} onClick={handleGithubDisconnect}>
+                        Turn off
+                      </button>
+                    </div>
+                  )}
+                  {githubConflict && (
+                    <div className="settings-row-buttons">
+                      <button type="button" className="btn btn-quiet btn-sm" disabled={!!githubBusy} onClick={handleGithubDisconnect}>
+                        Turn off
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : githubFormOpen ? (
+                <form className="github-form" onSubmit={handleGithubConnect}>
+                  <ol className="setup-steps">
+                    <li>
+                      On GitHub, <a href="https://github.com/new" target="_blank" rel="noreferrer">create a new
+                      repository</a>. Name it something like <strong>hyplog-backups</strong> and set it
+                      to <strong>Private</strong>.
+                    </li>
+                    <li>
+                      <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">Create
+                      a fine-grained token</a>. Under Repository access choose <strong>Only select
+                      repositories</strong> and pick that repo. Under Permissions, add
+                      <strong> Contents</strong> and set it to <strong>Read and write</strong>. Pick the
+                      longest expiration.
+                    </li>
+                    <li>Generate the token, copy it, and paste it below.</li>
+                  </ol>
+
+                  <div className="form-group">
+                    <label htmlFor="github-repo">Repository</label>
+                    <input
+                      id="github-repo"
+                      className="form-input"
+                      value={githubRepoInput}
+                      onChange={(e) => setGithubRepoInput(e.target.value)}
+                      placeholder="your-name/hyplog-backups"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="github-token">Token</label>
+                    <input
+                      id="github-token"
+                      className="form-input"
+                      type="password"
+                      value={githubTokenInput}
+                      onChange={(e) => setGithubTokenInput(e.target.value)}
+                      placeholder="github_pat_…"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                    />
+                    <span className="field-note">
+                      Stays on this phone, and can only touch that one repo.
+                    </span>
+                  </div>
+                  <div className="settings-row-buttons">
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={githubBusy === 'connect'}>
+                      {githubBusy === 'connect' ? 'Connecting…' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={githubBusy === 'connect'}
+                      onClick={() => { setGithubFormOpen(false); setGithubNote(null); setGithubTokenInput(''); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <span className="settings-row-sub">
+                    Save every workout to a private GitHub repo you own, with nothing to tap
+                    and no file to put anywhere. Works on iPhone. Takes a few minutes to set up, once.
+                  </span>
+                  <div className="settings-row-buttons">
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => setGithubFormOpen(true)}>
+                      Set up
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {githubNote && (
+                <div role={githubNote.kind === 'error' ? 'alert' : 'status'} className={`inline-status ${githubNote.kind === 'error' ? 'is-danger' : 'is-brass'}`}>
+                  {githubNote.kind === 'error'
+                    ? <X size={15} strokeWidth={2.5} aria-hidden="true" />
+                    : <Check size={15} strokeWidth={2.5} aria-hidden="true" />}
+                  {githubNote.text}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Automatic backups to a folder on disk (Chrome/Edge only; Safari
+              and iOS can't, and GitHub above covers them) */}
+          {backupFolderSupported() && (
           <div className="settings-row has-rule">
             <HardDrive size={18} className="settings-row-icon" aria-hidden="true" />
             <div className="settings-row-main">
-              <span className="settings-row-title">Automatic backups</span>
+              <span className="settings-row-title">Backups to a folder</span>
               <span className="settings-row-sub">
-                {!backupFolderSupported()
-                  ? 'This browser can’t write backups to a folder (Safari and iOS don’t support it). Use Export and save the file somewhere safe.'
-                  : backupFolderName
-                    ? <>Saving to <strong>{backupFolderName}</strong> after a workout, at most once every few days.</>
-                    : 'Pick a folder once and a backup is written after your workouts, with nothing to remember.'}
+                {backupFolderName
+                  ? <>Saving to <strong>{backupFolderName}</strong> after a workout, at most once every few days.</>
+                  : 'Pick a folder once and a backup is written after your workouts, with nothing to remember.'}
               </span>
               {backupFolderSupported() && (
                 <div className="settings-row-buttons">
@@ -999,6 +1266,7 @@ export default function Settings({
               )}
             </div>
           </div>
+          )}
 
           {/* Storage use, when the browser can't say whether it's persistent */}
           {storagePersisted === null && estimate && estimate.usage > 0 && (
@@ -1079,7 +1347,7 @@ export default function Settings({
       {/* Import confirmation — shows what the file holds before it replaces anything */}
       {pendingImport && importSummary && (
         <ConfirmDialog
-          title="Replace your data with this backup?"
+          title={pendingImport.source === 'github' ? 'Replace your data with the GitHub backup?' : 'Replace your data with this backup?'}
           confirmLabel="Replace my data"
           busy={importing}
           onCancel={() => setPendingImport(null)}
@@ -1105,6 +1373,23 @@ export default function Settings({
           <p style={{ margin: 0 }}>
             Everything on this device is replaced by the backup.
           </p>
+        </ConfirmDialog>
+      )}
+
+      {/* Replace GitHub's copy, after a conflict, on purpose */}
+      {confirmGithubReplace && githubConflict && (
+        <ConfirmDialog
+          title="Replace the backup on GitHub?"
+          confirmLabel="Replace GitHub’s copy"
+          busy={githubBusy === 'replace'}
+          onCancel={() => setConfirmGithubReplace(false)}
+          onConfirm={handleGithubReplace}
+        >
+          The latest backup on GitHub will no longer include the {githubConflict.lost} workout
+          {githubConflict.lost === 1 ? '' : 's'} that {githubConflict.lost === 1 ? 'isn’t' : 'aren’t'} on this
+          phone. The repo’s history still keeps the old version, but restoring it from there
+          means going to GitHub. To bring {githubConflict.lost === 1 ? 'it' : 'them'} back here
+          instead, choose Restore from GitHub.
         </ConfirmDialog>
       )}
 

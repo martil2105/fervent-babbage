@@ -180,6 +180,14 @@ export default function App() {
             chooseBackupFolder={workoutState.chooseBackupFolder}
             forgetBackupFolder={workoutState.forgetBackupFolder}
             backupFolderName={workoutState.backupFolderName}
+            githubRepo={workoutState.githubRepo}
+            githubStatus={workoutState.githubStatus}
+            connectGithubBackup={workoutState.connectGithubBackup}
+            disconnectGithubBackup={workoutState.disconnectGithubBackup}
+            backUpToGithubNow={workoutState.backUpToGithubNow}
+            replaceGithubBackup={workoutState.replaceGithubBackup}
+            fetchGithubBackup={workoutState.fetchGithubBackup}
+            restoreFromGithub={workoutState.restoreFromGithub}
             exportData={workoutState.exportData}
             importData={workoutState.importData}
             clearAllData={workoutState.clearAllData}
@@ -196,6 +204,9 @@ export default function App() {
             routines={workoutState.routines}
             lastBackupAt={workoutState.preferences?.lastBackupAt || null}
             hasBackupFolder={!!workoutState.backupFolderName}
+            githubRepo={workoutState.githubRepo}
+            githubStatus={workoutState.githubStatus}
+            onOpenSettings={() => setActiveTab('settings')}
             exportData={workoutState.exportData}
           />
         );
