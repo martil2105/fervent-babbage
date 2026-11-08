@@ -28,6 +28,7 @@ A Progressive Web App for logging hypertrophy training on a phone. Built with Re
 - **Progression helper**: suggests adding weight (by that exercise's step) only when every working set hit the top of the rep range at RPE ≤ 9 / RIR ≥ 1; otherwise hold, or chase reps.
 - **Summary**: this week's working volume against the *same point* last week, the days you trained, weekly volume trend, hard sets per muscle group against the 10–20 sets/week guideline (Quads and Hamstrings counted separately), and what to aim for next time.
 - **Progress**: lifetime totals, week streak, per-exercise strength progression (top set + estimated 1RM), volume load, a 12-week consistency heatmap, effort trend, and 4-week muscle balance.
+- **Exercises to chart** (Settings → Progress, or *Change* on the Progress page): tick the lifts you want per-exercise charts for, and only those get Strength and Volume load chips and a row in the Summary's exercise list. Exercises added later stay off until you tick them. Totals, consistency, effort and muscle balance always count every exercise.
 - **History**: every session, editable after the fact (sets, date, duration) or deletable; personal bests per exercise.
 
 ### Keeping your data

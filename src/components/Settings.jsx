@@ -2,13 +2,16 @@ import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Check, X, FileDown, FileUp, Trash, ShieldCheck, ShieldAlert, HardDrive, AlertTriangle, ArrowUpDown, GitMerge, CloudUpload, CloudAlert } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import ReorderSheet from './ReorderSheet';
+import ChartedExercisesSheet from './ChartedExercisesSheet';
 import { findMatchingExercise, findDuplicateExerciseGroups } from '../utils/exerciseLibrary';
 import {
   SELECTABLE_MUSCLE_GROUPS as MUSCLE_GROUPS,
   formatWeight,
   formatDate,
   roundWeight,
-  orderExercisesByRoutines
+  orderExercisesByRoutines,
+  getDisplayExercises,
+  filterChartedExercises
 } from '../utils/workoutHelpers';
 import { isSupported as backupFolderSupported } from '../utils/autoBackup';
 import { parseBackup, summarizeSessions, countSessionsLostByRestore } from '../utils/backupFile';
@@ -20,12 +23,21 @@ import {
 } from '../utils/restNotification';
 import { getStorageEstimate, formatBytes } from '../utils/storagePersistence';
 
+// "Leg Press", "Leg Press and Leg Curl", "A, B and C", "A, B, C and 2 more"
+const listNames = (names, max = 3) => {
+  if (names.length > max) return `${names.slice(0, max).join(', ')} and ${names.length - max} more`;
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+};
+
 export default function Settings({
   exercises,
   routines = [],
   history = [],
   preferences,
   updatePreference,
+  chartedIds = null,
+  onChartedChange,
   addExerciseToConfig,
   updateExerciseInConfig,
   deleteExerciseFromConfig,
@@ -129,6 +141,17 @@ export default function Settings({
 
   // Session order for the exercise list, so it reads like the workouts do.
   const orderedExercises = orderExercisesByRoutines(exercises, routines);
+
+  // Which exercises Progress charts: everything it could show (the library
+  // plus exercises only in history), narrowed to the ones ticked, if any.
+  const [choosingCharted, setChoosingCharted] = useState(false);
+  const chartable = getDisplayExercises(orderedExercises, history);
+  const charted = filterChartedExercises(chartable, chartedIds);
+  const chartedSummary = chartable.length === 0
+    ? 'No exercises yet.'
+    : charted.length === chartable.length
+      ? `All ${chartable.length} exercises get charts.`
+      : `${charted.length} of ${chartable.length}: ${listNames(charted.map((ex) => ex.name))}.`;
 
   // Storage durability + backup freshness
   const [nowTs] = useState(() => Date.now()); // stable clock read (avoids impure render)
@@ -469,7 +492,28 @@ export default function Settings({
         </div>
       </section>
 
-      {/* 2. Sessions (routines) */}
+      {/* 2. Progress: which exercises get charts */}
+      <section className="settings-section">
+        <h2 className="section-label">Progress</h2>
+        <div className="card">
+          <div className="settings-row">
+            <div className="settings-row-main">
+              <span className="settings-row-title">Exercises to chart</span>
+              <span className="settings-row-sub">{chartedSummary}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setChoosingCharted(true)}
+              disabled={chartable.length === 0}
+            >
+              Choose
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Sessions (routines) */}
       <section className="settings-section">
         <h2 className="section-label">Sessions</h2>
         <div className="card">
@@ -617,7 +661,7 @@ export default function Settings({
         </section>
       )}
 
-      {/* 3. Exercise library */}
+      {/* 4. Exercise library */}
       <section className="settings-section">
         <div className="section-head">
           <h2 className="section-label">Exercise library</h2>
@@ -1016,7 +1060,7 @@ export default function Settings({
         </div>
       </section>
 
-      {/* 4. Data and backup */}
+      {/* 5. Data and backup */}
       <section className="settings-section">
         <h2 className="section-label">Data and backup</h2>
         <div className="card">
@@ -1309,7 +1353,7 @@ export default function Settings({
         </div>
       </section>
 
-      {/* 5. Reset */}
+      {/* 6. Reset */}
       <section className="settings-section">
         <h2 className="section-label">Reset</h2>
         <div className="card">
@@ -1391,6 +1435,17 @@ export default function Settings({
           means going to GitHub. To bring {githubConflict.lost === 1 ? 'it' : 'them'} back here
           instead, choose Restore from GitHub.
         </ConfirmDialog>
+      )}
+
+      {choosingCharted && (
+        <ChartedExercisesSheet
+          exercises={exercises}
+          routines={routines}
+          history={history}
+          chosenIds={chartedIds}
+          onSave={onChartedChange}
+          onClose={() => setChoosingCharted(false)}
+        />
       )}
 
       {reorderRoutine && (

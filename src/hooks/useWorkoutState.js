@@ -6,7 +6,9 @@ import {
   getLastSessionSets,
   roundWeight,
   buildWorkoutExercise,
-  defaultWeightStep
+  defaultWeightStep,
+  CHARTED_EXERCISES_KEY,
+  remapChartedAfterMerge
 } from '../utils/workoutHelpers';
 import {
   buildExerciseCatalog,
@@ -480,6 +482,10 @@ export const useWorkoutState = () => {
   const updatePreference = async (key, value) => {
     await db.preferences.put({ key, value });
   };
+
+  // Which exercises Progress charts (and the Summary lists): an array of ids,
+  // or null for all of them. See CHARTED_EXERCISES_KEY in workoutHelpers.
+  const setChartedExerciseIds = (ids) => updatePreference(CHARTED_EXERCISES_KEY, ids ?? null);
 
   // --- Automatic backup ----------------------------------------------------
 
@@ -1086,10 +1092,16 @@ export const useWorkoutState = () => {
     const sources = (sourceIds || []).filter((id) => id && id !== target?.id);
     if (!target?.id || sources.length === 0) return false;
 
-    await db.transaction('rw', [db.history, db.exercises, db.routines], async () => {
+    await db.transaction('rw', [db.history, db.exercises, db.routines, db.preferences], async () => {
       let sessions = await db.history.toArray();
       let library = await db.exercises.toArray();
       let savedRoutines = await db.routines.toArray();
+
+      // A lift chosen for Progress follows its history onto the target, so
+      // it doesn't drop off the charts when its old name goes.
+      const charted = (await db.preferences.get(CHARTED_EXERCISES_KEY))?.value;
+      const remapped = remapChartedAfterMerge(charted, sources, target.id);
+      if (remapped !== charted) await db.preferences.put({ key: CHARTED_EXERCISES_KEY, value: remapped });
 
       for (const sourceId of sources) {
         const plan = planExerciseMerge({ sessions, library, routines: savedRoutines, sourceId, target });
@@ -1246,6 +1258,8 @@ export const useWorkoutState = () => {
     restEndTime,
     restTotalMs,
     updatePreference,
+    chartedExerciseIds: preferences?.[CHARTED_EXERCISES_KEY] ?? null,
+    setChartedExerciseIds,
     startRestTimer,
     extendRestTimer,
     clearRestTimer,

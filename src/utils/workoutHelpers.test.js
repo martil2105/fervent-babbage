@@ -39,6 +39,11 @@ import {
   buildWorkoutExercise,
   summarizeSets,
   getExerciseHistory,
+  CHARTED_EXERCISES_KEY,
+  resolveChartedIds,
+  filterChartedExercises,
+  normalizeChartedChoice,
+  remapChartedAfterMerge,
 } from './workoutHelpers.js';
 
 // --- small builders to keep the cases readable --------------------------------
@@ -835,6 +840,85 @@ describe('orderExercisesByRoutines', () => {
     expect(orderExercisesByRoutines(input, []).map((e) => e.id)).toEqual(['z', 'a']);
     orderExercisesByRoutines(input, routines);
     expect(input.map((e) => e.id)).toEqual(['z', 'a']);
+  });
+});
+
+// --- Exercises to chart (2026-11-08) ----------------------------------------------
+
+describe('exercises to chart', () => {
+  // Session order, as Progress builds it: Push, then Legs, then a one-off.
+  const shown = [
+    { id: 'db-shoulder-press' }, { id: 'lateral-raises' }, { id: 'db-chest-press' },
+    { id: 'leg-curl' }, { id: 'leg-press' }, { id: 'one-off' },
+  ];
+  const allIds = shown.map((e) => e.id);
+  const ids = (list) => list.map((e) => e.id);
+
+  it('stores the choice under its own preference key', () => {
+    expect(CHARTED_EXERCISES_KEY).toBe('chartedExerciseIds');
+  });
+
+  it('shows everything when no choice was made', () => {
+    expect(filterChartedExercises(shown, undefined)).toBe(shown);
+    expect(filterChartedExercises(shown, null)).toBe(shown);
+    expect(resolveChartedIds(allIds, null)).toBeNull();
+  });
+
+  it('keeps only the chosen exercises, in session order rather than the order chosen', () => {
+    expect(ids(filterChartedExercises(shown, ['leg-press', 'db-shoulder-press']))).toEqual(['db-shoulder-press', 'leg-press']);
+  });
+
+  it('keeps a new exercise off once a choice exists', () => {
+    const withNew = [...shown, { id: 'bulgarian-split-squat' }];
+    expect(ids(filterChartedExercises(withNew, ['leg-press']))).toEqual(['leg-press']);
+  });
+
+  it('ignores chosen ids that no longer exist', () => {
+    expect(ids(filterChartedExercises(shown, ['gone', 'leg-curl']))).toEqual(['leg-curl']);
+    expect([...resolveChartedIds(allIds, ['gone', 'leg-curl'])]).toEqual(['leg-curl']);
+  });
+
+  it('falls back to everything when nothing chosen is left, or the list is empty', () => {
+    expect(filterChartedExercises(shown, ['gone'])).toBe(shown);
+    expect(filterChartedExercises(shown, [])).toBe(shown);
+    expect(resolveChartedIds(allIds, [])).toBeNull();
+  });
+
+  it('copes with a missing exercise list', () => {
+    expect(filterChartedExercises(undefined, ['a'])).toEqual([]);
+  });
+
+  describe('normalizeChartedChoice', () => {
+    it('stores the ticked ids in session order', () => {
+      expect(normalizeChartedChoice(['leg-press', 'lateral-raises'], allIds)).toEqual(['lateral-raises', 'leg-press']);
+    });
+    it('stores null when everything is ticked, so exercises added later show up too', () => {
+      expect(normalizeChartedChoice([...allIds].reverse(), allIds)).toBeNull();
+    });
+    it('stores null when nothing is ticked, which shows everything', () => {
+      expect(normalizeChartedChoice([], allIds)).toBeNull();
+      expect(normalizeChartedChoice(undefined, allIds)).toBeNull();
+    });
+    it('drops ids outside the list', () => {
+      expect(normalizeChartedChoice(['gone', 'leg-curl'], allIds)).toEqual(['leg-curl']);
+      expect(normalizeChartedChoice(['gone'], allIds)).toBeNull();
+    });
+  });
+
+  describe('remapChartedAfterMerge', () => {
+    it('moves a chosen source onto the exercise it merged into', () => {
+      expect(remapChartedAfterMerge(['incline-db-press', 'leg-press'], ['incline-db-press'], 'incline-press'))
+        .toEqual(['incline-press', 'leg-press']);
+    });
+    it('does not list the target twice when it was already chosen', () => {
+      expect(remapChartedAfterMerge(['a', 'b', 'c'], ['a', 'c'], 'b')).toEqual(['b']);
+    });
+    it('returns the same list when nothing chosen was merged, and leaves no choice alone', () => {
+      const chosen = ['leg-press'];
+      expect(remapChartedAfterMerge(chosen, ['x'], 'y')).toBe(chosen);
+      expect(remapChartedAfterMerge(null, ['x'], 'y')).toBeNull();
+      expect(remapChartedAfterMerge(undefined, ['x'], 'y')).toBeUndefined();
+    });
   });
 });
 

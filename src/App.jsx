@@ -142,6 +142,8 @@ export default function App() {
             history={workoutState.history}
             exercises={workoutState.exercises}
             routines={workoutState.routines}
+            chartedIds={workoutState.chartedExerciseIds}
+            onChartedChange={workoutState.setChartedExerciseIds}
           />
         );
       case 'history':
@@ -165,6 +167,8 @@ export default function App() {
             history={workoutState.history}
             preferences={workoutState.preferences}
             updatePreference={workoutState.updatePreference}
+            chartedIds={workoutState.chartedExerciseIds}
+            onChartedChange={workoutState.setChartedExerciseIds}
             addExerciseToConfig={workoutState.addExerciseToConfig}
             updateExerciseInConfig={workoutState.updateExerciseInConfig}
             deleteExerciseFromConfig={workoutState.deleteExerciseFromConfig}
@@ -208,6 +212,8 @@ export default function App() {
             githubStatus={workoutState.githubStatus}
             onOpenSettings={() => setActiveTab('settings')}
             exportData={workoutState.exportData}
+            chartedIds={workoutState.chartedExerciseIds}
+            onChartedChange={workoutState.setChartedExerciseIds}
           />
         );
     }

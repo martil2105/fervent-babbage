@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import { Flame, TrendingUp } from 'lucide-react';
 import ChartTooltip from './ChartTooltip';
+import ChartedExercisesSheet from './ChartedExercisesSheet';
 import {
   getExerciseProgression,
   getSessionAvgRpe,
@@ -11,6 +12,7 @@ import {
   getWeeklyStreak,
   getDailyVolumeMap,
   getDisplayExercises,
+  filterChartedExercises,
   groupSessionsByWeek,
   getMondayOfDate,
   getStartOfDay,
@@ -32,13 +34,21 @@ const axisTick = { fill: 'var(--ink-3)', fontSize: 11 };
 // Signed percentage with a real minus sign
 const signedPct = (pct) => (pct > 0 ? `+${pct}%` : pct < 0 ? `−${Math.abs(pct)}%` : '0%');
 
-export default function Analytics({ history, exercises, routines = [] }) {
+export default function Analytics({ history, exercises, routines = [], chartedIds = null, onChartedChange }) {
   // Chips in session order (Push's exercises, then Legs'), history-only
-  // exercises after them.
-  const displayExercises = useMemo(
+  // exercises after them — narrowed to the ones chosen in Settings, if any.
+  // Only the per-exercise charts follow that choice: the totals, heatmap,
+  // effort and muscle balance below keep counting every exercise.
+  const chartableExercises = useMemo(
     () => getDisplayExercises(orderExercisesByRoutines(exercises, routines), history),
     [exercises, routines, history]
   );
+  const displayExercises = useMemo(
+    () => filterChartedExercises(chartableExercises, chartedIds),
+    [chartableExercises, chartedIds]
+  );
+  const isNarrowed = displayExercises.length < chartableExercises.length;
+  const [choosing, setChoosing] = useState(false);
 
   // Per-exercise progression series, keyed by id (computed once per history change)
   const progressionById = useMemo(() => {
@@ -64,7 +74,8 @@ export default function Analytics({ history, exercises, routines = [] }) {
   }, [displayExercises, progressionById]);
 
   const [selectedId, setSelectedId] = useState(null);
-  const activeId = selectedId || defaultExerciseId;
+  // A chip that was just unticked in the chooser falls back to the default.
+  const activeId = displayExercises.some((ex) => ex.id === selectedId) ? selectedId : defaultExerciseId;
 
   if (!history || history.length === 0) {
     return (
@@ -234,6 +245,15 @@ export default function Analytics({ history, exercises, routines = [] }) {
             </button>
           ))}
         </div>
+
+        {isNarrowed && (
+          <p className="filter-note">
+            {displayExercises.length} of {chartableExercises.length} exercises.{' '}
+            <button type="button" className="link-btn" onClick={() => setChoosing(true)}>
+              Change
+            </button>
+          </p>
+        )}
 
         {chartData.length >= 2 ? (
           <>
@@ -455,6 +475,17 @@ export default function Analytics({ history, exercises, routines = [] }) {
           <p className="chart-empty">No working sets logged in the last 4 weeks.</p>
         )}
       </div>
+
+      {choosing && (
+        <ChartedExercisesSheet
+          exercises={exercises}
+          routines={routines}
+          history={history}
+          chosenIds={chartedIds}
+          onSave={onChartedChange}
+          onClose={() => setChoosing(false)}
+        />
+      )}
     </div>
   );
 }

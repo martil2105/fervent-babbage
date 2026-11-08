@@ -6,6 +6,7 @@ import {
   getProgressionSuggestion,
   getMondayOfDate,
   getDisplayExercises,
+  filterChartedExercises,
   getAccretionSeries,
   getWeekToDateComparison,
   orderExercisesByRoutines,
@@ -14,6 +15,7 @@ import {
 } from '../utils/workoutHelpers';
 import AccretionStrip from './AccretionStrip';
 import ChartTooltip from './ChartTooltip';
+import ChartedExercisesSheet from './ChartedExercisesSheet';
 import { isBackupDue, daysSinceBackup } from '../utils/autoBackup';
 import { PERSISTENT_ERRORS } from '../utils/githubBackup';
 import { formatNumber, sentenceCase } from '../utils/format';
@@ -50,10 +52,13 @@ export default function Dashboard({
   hasBackupFolder,
   githubRepo,
   githubStatus,
-  onOpenSettings
+  onOpenSettings,
+  chartedIds = null,
+  onChartedChange
 }) {
   const [breakdownView, setBreakdownView] = useState('muscleGroups'); // 'muscleGroups' | 'exercises'
   const [backupDismissed, setBackupDismissed] = useState(false);
+  const [choosingCharted, setChoosingCharted] = useState(false);
 
   // Session order (Push's exercises, then Legs'), not the library's id order.
   const orderedExercises = useMemo(
@@ -61,15 +66,27 @@ export default function Dashboard({
     [exercises, routines]
   );
 
+  // The per-exercise breakdown lists the exercises chosen for Progress, if a
+  // choice was made in Settings; otherwise all of them.
+  const chartableExercises = useMemo(
+    () => getDisplayExercises(orderedExercises, history),
+    [orderedExercises, history]
+  );
+  const breakdownExercises = useMemo(
+    () => filterChartedExercises(chartableExercises, chartedIds),
+    [chartableExercises, chartedIds]
+  );
+  const breakdownNarrowed = breakdownExercises.length < chartableExercises.length;
+
   // One walk of history per exercise, not one per render — the breakdown
   // toggles views often and each series re-sorts every session.
   const accretionByExercise = useMemo(() => {
     const map = {};
-    getDisplayExercises(orderedExercises, history).forEach((ex) => {
+    breakdownExercises.forEach((ex) => {
       map[ex.id] = getAccretionSeries(ex.id, history);
     });
     return map;
-  }, [orderedExercises, history]);
+  }, [breakdownExercises, history]);
 
   // Stable clock read — react-compiler rejects Date.now() during render.
   const [nowTs] = useState(() => Date.now());
@@ -415,7 +432,7 @@ export default function Dashboard({
           </div>
         ) : (
           <div className="mg-list">
-            {getDisplayExercises(orderedExercises, history).map((ex) => {
+            {breakdownExercises.map((ex) => {
               const vol = currentWeekData.exerciseVolume[ex.id] || 0;
               const sets = currentWeekData.exerciseSets[ex.id] || 0;
               // Hide history-only exercises with no activity this week to avoid clutter
@@ -434,6 +451,14 @@ export default function Dashboard({
               );
             })}
           </div>
+        )}
+        {breakdownView === 'exercises' && breakdownNarrowed && (
+          <p className="footnote filter-note">
+            Only the exercises you chart on Progress.{' '}
+            <button type="button" className="link-btn" onClick={() => setChoosingCharted(true)}>
+              Change
+            </button>
+          </p>
         )}
       </div>
 
@@ -470,6 +495,17 @@ export default function Dashboard({
           in reserve).
         </p>
       </div>
+
+      {choosingCharted && (
+        <ChartedExercisesSheet
+          exercises={exercises}
+          routines={routines}
+          history={history}
+          chosenIds={chartedIds}
+          onSave={onChartedChange}
+          onClose={() => setChoosingCharted(false)}
+        />
+      )}
     </div>
   );
 }

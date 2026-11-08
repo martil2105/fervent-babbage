@@ -903,6 +903,64 @@ export const orderExercisesByRoutines = (exercises = [], routines = []) => {
     .map(({ ex }) => ex);
 };
 
+// --- Exercises to chart ---------------------------------------------------------
+//
+// Progress (and the Summary's per-exercise list) can be narrowed to the lifts
+// you care about. The choice is a list of exercise ids stored under this
+// preference key. No list means no choice: everything shows, including
+// exercises added later. Once there is a list, a new exercise stays off it
+// until it's ticked, so a one-off logged on the fly never clutters the charts.
+export const CHARTED_EXERCISES_KEY = 'chartedExerciseIds';
+
+/**
+ * The chosen ids that still name one of `allIds`, as a Set — or null when no
+ * choice applies: nothing stored, an empty list, or nothing chosen left (all
+ * of it deleted or merged away). Null means "show everything": an empty
+ * Progress page would help nobody.
+ */
+export const resolveChartedIds = (allIds = [], chosenIds) => {
+  if (!Array.isArray(chosenIds)) return null;
+  const all = new Set(allIds);
+  const kept = chosenIds.filter((id) => all.has(id));
+  return kept.length > 0 ? new Set(kept) : null;
+};
+
+/**
+ * `exercises` narrowed to the chosen ones, keeping the order they came in —
+ * session order, where the caller passes that. Everything when no choice
+ * applies (see resolveChartedIds).
+ */
+export const filterChartedExercises = (exercises = [], chosenIds) => {
+  const chosen = resolveChartedIds((exercises || []).map((ex) => ex.id), chosenIds);
+  return chosen ? exercises.filter((ex) => chosen.has(ex.id)) : exercises || [];
+};
+
+/**
+ * The value to store for a set of ticked ids. `allIds` is every exercise the
+ * choice covers, in display order. Everything ticked, or nothing, stores null
+ * ("show all", new exercises included); anything in between stores the ticked
+ * ids in display order. Ids outside `allIds` are dropped.
+ */
+export const normalizeChartedChoice = (tickedIds, allIds = []) => {
+  const ticked = new Set(tickedIds || []);
+  const kept = allIds.filter((id) => ticked.has(id));
+  if (kept.length === 0 || kept.length === allIds.length) return null;
+  return kept;
+};
+
+/**
+ * After merging `sourceIds` into `targetId`: a chosen source hands its place
+ * to the target, so a lift you chose doesn't drop off Progress just because
+ * its history now lives under another name. Returns `chosenIds` itself when
+ * nothing chosen was merged, so callers can skip the write.
+ */
+export const remapChartedAfterMerge = (chosenIds, sourceIds = [], targetId) => {
+  if (!Array.isArray(chosenIds) || !targetId) return chosenIds;
+  const sources = new Set(sourceIds);
+  if (!chosenIds.some((id) => sources.has(id))) return chosenIds;
+  return [...new Set(chosenIds.map((id) => (sources.has(id) ? targetId : id)))];
+};
+
 /**
  * How much of an in-progress workout has been ticked off. Used to warn before
  * finishing with sets still open, and to refuse saving a session with none.
